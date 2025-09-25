@@ -67,9 +67,6 @@ class Lab2(Node):
 
     def spin(self):
         rclpy.spin(self)
-        if self.state == "end":
-            rclpy.shutdown()
-
 
 def main():
     rclpy.init()
