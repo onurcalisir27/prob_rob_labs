@@ -17,7 +17,7 @@ class Lab2(Node):
         self.feature_sub_ = self.create_subscription(Float64, "/feature_mean", self.sub_callback, 10)
 
         self.state = "init"
-        self.declare_parameter('desired_speed', 1.0)
+        self.declare_parameter('desired_speed', 2.0)
         self.desired_speed = self.get_parameter('desired_speed').get_parameter_value().double_value
         self.count = 0
         self.feature_mean = 0
@@ -30,14 +30,14 @@ class Lab2(Node):
         elif self.state == "open":
             self.log.info("Opening Door")
             torque_msg = Float64()
-            torque_msg.data = 5.0
+            torque_msg.data = 10.0
             self.torque_pub_.publish(torque_msg)
             self.count += 1
-            if self.feature_mean < 270:
-                torque_msg = Float64()
-                torque_msg.data = 0.0
-                self.torque_pub_.publish(torque_msg)
+            if self.feature_mean < 250:
                 self.state = "drive"
+                self.count = 0
+            else:
+                self.state = "open"
                 self.count = 0
         
         elif self.state == "drive":
@@ -46,7 +46,7 @@ class Lab2(Node):
             vel_msg.linear.x = self.desired_speed
             self.vel_pub_.publish(vel_msg)
             self.count += 1
-            if self.count == 80:
+            if self.count == 100:
                 self.state = "close"
                 vel_msg = Twist()
                 vel_msg.linear.x = 0.0

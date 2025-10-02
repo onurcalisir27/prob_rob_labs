@@ -10,7 +10,7 @@ def generate_launch_description():
     return LaunchDescription([
         DeclareLaunchArgument('use_sim_time', default_value='true',
                               description='set to true for simulation'),
-        DeclareLaunchArgument('desired_speed', default_value='1.0', description='Desired Forward Speed for the Bot'
+        DeclareLaunchArgument('desired_speed', default_value='0.5', description='Desired Forward Speed for the Bot'
     ),                 
         Node(
             package='prob_rob_labs',
