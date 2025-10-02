@@ -13,10 +13,14 @@ class Lab2(Node):
         self.timer = self.create_timer(heartbeat_period, self.heartbeat)
         self.vel_pub_ = self.create_publisher(Twist, "/cmd_vel", 10)
         self.torque_pub_ = self.create_publisher(Float64, "/hinged_glass_door/torque", 10)
+        
+        self.feature_sub_ = self.create_subscription(Float64, "/feature_mean", self.sub_callback, 10)
+
         self.state = "init"
         self.declare_parameter('desired_speed', 1.0)
         self.desired_speed = self.get_parameter('desired_speed').get_parameter_value().double_value
         self.count = 0
+        self.feature_mean = 0
 
     def heartbeat(self):
         self.log.info("Update Count")
@@ -29,7 +33,7 @@ class Lab2(Node):
             torque_msg.data = 5.0
             self.torque_pub_.publish(torque_msg)
             self.count += 1
-            if self.count == 40:
+            if self.feature_mean < 270:
                 torque_msg = Float64()
                 torque_msg.data = 0.0
                 self.torque_pub_.publish(torque_msg)
@@ -42,7 +46,7 @@ class Lab2(Node):
             vel_msg.linear.x = self.desired_speed
             self.vel_pub_.publish(vel_msg)
             self.count += 1
-            if self.count == 40:
+            if self.count == 80:
                 self.state = "close"
                 vel_msg = Twist()
                 vel_msg.linear.x = 0.0
@@ -64,6 +68,9 @@ class Lab2(Node):
         
         elif self.state == "end":
             self.log.info('Im Done!')
+
+    def sub_callback(self, msg):
+        self.feature_mean = msg.data
 
     def spin(self):
         rclpy.spin(self)
