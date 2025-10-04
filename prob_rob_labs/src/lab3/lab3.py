@@ -53,13 +53,15 @@ class Lab3(Node):
             else:
                 # P(z=closed | x=open)
                 false_negatives +=1
-        
+
         self.P_z_closed_x_closed = true_negatives / (true_negatives + false_positives)
         self.P_z_open_x_closed = false_positives / (true_negatives + false_positives)
         self.P_z_open_x_open = true_positives / (true_positives + false_negatives)
         self.P_z_closed_x_open = false_negatives / (true_positives + false_negatives)
-        
-        self.log.info(f"Probabilities from total samples:{self.horizon*self.trials}, threshold:{self.threshold} ")
+
+        total_samples = len(self.z_given_x_closed) + len(self.z_given_x_open)
+        self.log.info(f"Probabilities from {len(self.z_given_x_closed)} closed samples, {len(self.z_given_x_open)} open samples")
+        self.log.info(f"Threshold Value at: {self.threshold}, total samples: {total_samples}")
         self.log.info(f"P(z=closed | x=closed) = {self.P_z_closed_x_closed}")
         self.log.info(f"P(z=open | x=closed) = {self.P_z_open_x_closed}")
         self.log.info(f"P(z=open | x=open) = {self.P_z_open_x_open}")
@@ -96,7 +98,7 @@ class Lab3(Node):
                 self.state = "closing"
                 self.count = 0
             else:
-                self.z_given_x_open.append(self.z) 
+                self.z_given_x_open.append(self.z)
 
         elif self.state == "closing":
             self.move_door(-10.0)
@@ -105,7 +107,7 @@ class Lab3(Node):
                 self.count = 0
                 self.log.info(f"Door is closed, finished trial numer:{self.trials}, starting new trial")
                 self.trials +=1
-        
+
         elif self.state == "finished":
             self.move_door(-10.0)
             if self.count > 50:
@@ -116,7 +118,7 @@ class Lab3(Node):
         torque_msg = Float64()
         torque_msg.data = value
         self.torque_pub_.publish(torque_msg)
-   
+
 def main():
     rclpy.init()
     lab3 = Lab3()
