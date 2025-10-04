@@ -11,7 +11,7 @@ def generate_launch_description():
         DeclareLaunchArgument('use_sim_time', default_value='true',
                               description='set to true for simulation'),
         DeclareLaunchArgument('horizon', default_value='1000', description="Averaging Horizon"),
-        DeclareLaunchArgument('threshold', default_value='210.0', description='Trigger Threshold'),
+        DeclareLaunchArgument('threshold', default_value='235.0', description='Trigger Threshold'),
         Node(
             package='prob_rob_labs',
             executable='lab3',
