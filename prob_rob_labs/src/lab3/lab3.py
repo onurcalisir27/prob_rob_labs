@@ -20,25 +20,40 @@ class Lab3(Node):
         self.declare_parameter('horizon', 1000)
         self.horizon = self.get_parameter('horizon').get_parameter_value().integer_value
 
-        self.state = "closed"
-        self.z_given_x_closed = []
-        self.z_given_x_open = []
-        self.count = 0
-        self.trials = 0
+        self.declare_parameter('collect_data', 0)
+        self.collect_data = self.get_parameter('collect_data').get_parameter_value().integer_value
 
-        self.P_z_closed_x_closed = 0
-        self.P_z_open_x_closed = 0
-        self.P_z_open_x_open = 0
-        self.P_z_closed_x_open = 0
+        if self.collect_data == 1:
+            self.state = "measure"
+            self.z_given_x_closed = []
+            self.z_given_x_open = []
+            self.count = 0
+            self.trials = 0
 
-        self.bel = np.array([[0.1],
-                            [0.9]])
+            self.P_z_closed_x_closed = 0
+            self.P_z_open_x_closed = 0
+            self.P_z_open_x_open = 0
+            self.P_z_closed_x_open = 0
+        else:
+            self.state = "decide"
+            self.z_given_x_closed = []
+            self.z_given_x_open = []
+            self.count = 0
+            self.trials = 0
+
+            self.P_z_closed_x_closed = 0.9812
+            self.P_z_open_x_closed = 0.0188
+            self.P_z_open_x_open = 0.936
+            self.P_z_closed_x_open = 0.064
+
+        self.bel = np.array([[0.0], # open
+                            [1.0]]) # closed
         
         self.measurement_model = np.array([[self.P_z_open_x_open, self.P_z_open_x_closed],
                                            [self.P_z_closed_x_open, self.P_z_closed_x_closed]])
 
-        self.prediction_model = np.array([1.0, 0.0],
-                                         [0.0, 1.0])
+        self.prediction_model = np.array([[1.0, 0.0],
+                                         [0.0, 1.0]])
 
         self.log.info(f"Using measurement model: {self.measurement_model}")
         self.log.info(f"Starting measuring with horizon:{self.horizon}, threshold:{self.threshold} ")
@@ -88,69 +103,69 @@ class Lab3(Node):
         self.count += 1
         z = msg.data
 
-        if self.trials == 3:
-            self.state = "finished"
+        if self.state == "measure":
+            if self.trials == 3:
+                self.log.info("Measurement phase ended, publishing findings")
+                self.move_door(-10.0)
+                if self.count > 50:
+                    self.calculate_probabilities()
+                    self.state = "decision"
+                    self.count = 0
 
-        if self.state == "closed":
-            if self.count > self.horizon:
-                self.log.info("Closed measurements ended, open the door now")
-                self.state = "opening"
-                self.count = 0
-            else:
-                self.z_given_x_closed.append(z)
+            if self.state == "closed":
+                if self.count > self.horizon:
+                    self.log.info("Closed measurements ended, open the door now")
+                    self.state = "opening"
+                    self.count = 0
+                else:
+                    self.z_given_x_closed.append(z)
 
-        elif self.state == "opening":
-            self.move_door(10.0)
-            if self.count > 100:
-                self.log.info("Door is open, resume measurements")
-                self.state = "open"
-                self.count = 0
+            elif self.state == "opening":
+                self.push_door(10.0)
+                if self.count > 100:
+                    self.log.info("Door is open, resume measurements")
+                    self.state = "open"
+                    self.count = 0
 
-        elif self.state == "open":
-            if self.count > self.horizon:
-                self.log.info("Open measurements ended, close the door now")
-                self.state = "closing"
-                self.count = 0
-            else:
-                self.z_given_x_open.append(z)
+            elif self.state == "open":
+                if self.count > self.horizon:
+                    self.log.info("Open measurements ended, close the door now")
+                    self.state = "closing"
+                    self.count = 0
+                else:
+                    self.z_given_x_open.append(z)
 
-        elif self.state == "closing":
-            self.move_door(-10.0)
-            if self.count > 100:
-                self.state = "closed"
-                self.count = 0
-                self.log.info(f"Door is closed, finished trial numer:{self.trials}, starting new trial")
-                self.trials +=1
-
-        elif self.state == "finished":
-            self.move_door(-10.0)
-            if self.count > 50:
-                self.calculate_probabilities()
-                self.state = "decision"
-                self.count = 0
+            elif self.state == "closing":
+                self.push_door(-10.0)
+                if self.count > 100:
+                    self.state = "closed"
+                    self.count = 0
+                    self.log.info(f"Door is closed, finished trial numer:{self.trials}, starting new trial")
+                    self.trials +=1
         
-        elif self.state == "decision":
+        elif self.state == "decide":
             if z > self.threshold:
                 self.bayes_update(1) # closed is 1
             else:
                 self.bayes_update(0) # open is 0
 
-            if self.bel[0] < 0.9:
-                self.move_door(10.0) # if low confidence on the door being open, open it
+            if self.bel[0] < 0.9 and self.count < 10:
+                self.push_door(10.0) # if low confidence on the door being open, open it
             
-            if self.bel[0] > 0.999:
+            if self.bel[0] > 0.9999:
                 self.state = "drive"
                 self.count = 0
         
         elif self.state == "drive":
             msg = Twist()
             msg.linear.x = 1.0
-            if self.count < 50:
+            if self.count < 40:
                 self.vel_pub_.publish(msg)
             else:
+                self.push_door(-10.0)
                 rclpy.shutdown()
             
-    def move_door(self, value):
+    def push_door(self, value):
         torque_msg = Float64()
         torque_msg.data = value
         self.torque_pub_.publish(torque_msg)
@@ -160,7 +175,7 @@ class Lab3(Node):
         unnormalized_posterior = self.measurement_model[z, :] * bel_bar.flatten()
         posterior = unnormalized_posterior / sum(unnormalized_posterior)
         self.bel = np.array([posterior]).transpose()
-        self.log.info(f"Updated Belief: belief open: {self.bel[0]}, belief closed: {self.bel[1]}")
+        self.log.info(f"Updated Belief: belief open: {self.bel[0].flatten()}, belief closed: {self.bel[1].flatten()}")
 
 def main():
     rclpy.init()
