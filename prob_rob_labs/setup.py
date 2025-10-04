@@ -33,7 +33,6 @@ setup(
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
-            'lab3_bayes = lab3_bayes.lab3_bayes:main',
             'lab3 = lab3.lab3:main',
             'lab2 = lab2.lab2:main',
             'image_mean_feature_x = image_mean_feature_x.image_mean_feature_x:main',
