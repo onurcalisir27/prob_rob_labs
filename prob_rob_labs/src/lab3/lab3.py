@@ -55,7 +55,7 @@ class Lab3(Node):
 
         self.bel = np.array([[0.5], # open
                             [0.5]]) # closed
-        
+
         self.measurement_model = np.array([[self.P_z_open_x_open, self.P_z_open_x_closed],
                                            [self.P_z_closed_x_open, self.P_z_closed_x_closed]])
 
@@ -112,20 +112,17 @@ class Lab3(Node):
                     self.count = 0
                     self.log.info(f"Door is closed, finished trial numer:{self.trials}, starting new trial")
                     self.trials +=1
-        
+
         elif self.state == "control":
             if z > self.threshold:
                 self.bayes_update(1) # closed is 1
             else:
                 self.bayes_update(0) # open is 0
 
-            if self.bel[0] < 0.9 and self.count < 10:
-                self.push_door(10.0) # if low confidence on the door being open, open it
-            
             if self.bel[0] > 0.999:
                 self.state = "drive"
                 self.count = 0
-        
+
         elif self.state == "drive":
             if self.count < 60:
                 self.drive_bot(1.0)
@@ -133,7 +130,7 @@ class Lab3(Node):
                 self.push_door(-10.0)
                 self.drive_bot(0.0)
                 rclpy.shutdown()
-        
+
         else:
             self.log.info("I do not know what to do!")
             rclpy.shutdown()
@@ -141,7 +138,7 @@ class Lab3(Node):
     def push_door(self, value):
         if self.flaky_door:
             self.empty_pub_.publish(Empty())
-        else: 
+        else:
             torque_msg = Float64()
             torque_msg.data = value
             self.torque_pub_.publish(torque_msg)
@@ -152,11 +149,17 @@ class Lab3(Node):
         self.vel_pub_.publish(vel_msg)
 
     def bayes_update(self, z):
-        bel_bar = self.prediction_model @ self.bel
+        if self.bel[0] < 0.90: # take an action
+            self.push_door(5.0)
+            bel_bar = self.prediction_model @ self.bel
+        else:
+            # no action
+            bel_bar = np.identity(2, dtype=int) @ self.bel
+
         unnormalized_posterior = self.measurement_model[z, :] * bel_bar.flatten()
         posterior = unnormalized_posterior / sum(unnormalized_posterior)
         self.bel = np.array([posterior]).transpose()
-        self.log.info(f"Updated Belief: belief open: {self.bel[0]}, belief closed: {self.bel[1]}")
+        self.log.info(f"Updated Belief: belief open: {self.bel[0]}, belief closed:{self.bel[1]}")
 
     def calculate_probabilities(self):
         true_negatives = 0
