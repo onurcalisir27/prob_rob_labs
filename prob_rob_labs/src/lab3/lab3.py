@@ -113,13 +113,10 @@ class Lab3(Node):
             else:
                 self.z = 0 # open is 0
 
-<<<<<<< HEAD
             if self.bel[0] < 0.9:
                 self.push_door(5.0) # if low confidence on the door being open, open it
                 self.state = "pushing"
             
-=======
->>>>>>> 9fbd6f4199489306ad9148bd11db6b92908856ee
             if self.bel[0] > 0.999:
                 self.state = "drive"
                 self.count = 0
@@ -131,13 +128,7 @@ class Lab3(Node):
                 self.push_door(-5.0)
                 self.drive_bot(0.0)
                 rclpy.shutdown()
-<<<<<<< HEAD
         
-        elif self.state == "pushing":
-            if self.state 
-=======
-
->>>>>>> 9fbd6f4199489306ad9148bd11db6b92908856ee
         else:
             self.log.info("I do not know what to do!")
             rclpy.shutdown()
