@@ -27,14 +27,13 @@ class Lab3(Node):
 
         self.declare_parameter('flaky_door', 0)
         self.flaky_door = self.get_parameter('flaky_door').get_parameter_value().integer_value
-
+        self.z_given_x_closed = []
+        self.z_given_x_open = []
+        self.count = 0
+        self.trials = 0
+        
         if self.collect_data == 1:
             self.state = "measure"
-            self.z_given_x_closed = []
-            self.z_given_x_open = []
-            self.count = 0
-            self.trials = 0
-
             self.P_z_closed_x_closed = 0
             self.P_z_open_x_closed = 0
             self.P_z_open_x_open = 0
@@ -43,11 +42,6 @@ class Lab3(Node):
 
         else:
             self.state = "control"
-            self.z_given_x_closed = []
-            self.z_given_x_open = []
-            self.count = 0
-            self.trials = 0
-
             self.P_z_closed_x_closed = 0.9812
             self.P_z_open_x_closed = 0.0188
             self.P_z_open_x_open = 0.936
@@ -63,20 +57,20 @@ class Lab3(Node):
             self.prediction_model = np.array([[1.0, 0.0],
                                               [0.0, 1.0]])
         else:
-            self.prediction_model = np.array([[1.0, 0.2],
-                                              [0.0, 0.8]])
+            self.prediction_model = np.array([[1.0, 0.72],
+                                              [0.0, 0.28]])
 
         self.log.info(f"Using measurement model: {self.measurement_model}")
-        self.log.info(f"Using prediction model: {self.prediction_model}")
+        self.log.info(f"Using prediction model:  {self.prediction_model}")
 
     def step(self, msg):
         self.count += 1
-        z = msg.data
+        measurement = msg.data
 
         if self.state == "measure":
-            if self.trials == 3:
+            if self.trials == 5:
                 self.log.info("Measurement phase ended, publishing findings")
-                self.move_door(-10.0)
+                self.move_door(-5.0)
                 if self.count > 50:
                     self.calculate_probabilities()
                     self.state = "decision"
@@ -88,10 +82,10 @@ class Lab3(Node):
                     self.state = "opening"
                     self.count = 0
                 else:
-                    self.z_given_x_closed.append(z)
+                    self.z_given_x_closed.append(measurement)
 
             elif self.state == "opening":
-                self.push_door(10.0)
+                self.push_door(5.0)
                 if self.count > 100:
                     self.log.info("Door is open, resume measurements")
                     self.state = "open"
@@ -103,10 +97,10 @@ class Lab3(Node):
                     self.state = "closing"
                     self.count = 0
                 else:
-                    self.z_given_x_open.append(z)
+                    self.z_given_x_open.append(measurement)
 
             elif self.state == "closing":
-                self.push_door(-10.0)
+                self.push_door(-5.0)
                 if self.count > 100:
                     self.state = "closed"
                     self.count = 0
@@ -114,13 +108,14 @@ class Lab3(Node):
                     self.trials +=1
         
         elif self.state == "control":
-            if z > self.threshold:
-                self.bayes_update(1) # closed is 1
+            if measurement > self.threshold:
+                self.z = 1 # closed is 1
             else:
-                self.bayes_update(0) # open is 0
+                self.z = 0 # open is 0
 
-            if self.bel[0] < 0.9 and self.count < 10:
-                self.push_door(10.0) # if low confidence on the door being open, open it
+            if self.bel[0] < 0.9:
+                self.push_door(5.0) # if low confidence on the door being open, open it
+                self.state = "pushing"
             
             if self.bel[0] > 0.999:
                 self.state = "drive"
@@ -130,10 +125,12 @@ class Lab3(Node):
             if self.count < 60:
                 self.drive_bot(1.0)
             else:
-                self.push_door(-10.0)
+                self.push_door(-5.0)
                 self.drive_bot(0.0)
                 rclpy.shutdown()
         
+        elif self.state == "pushing":
+            if self.state 
         else:
             self.log.info("I do not know what to do!")
             rclpy.shutdown()

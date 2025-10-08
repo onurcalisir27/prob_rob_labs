@@ -18,10 +18,13 @@ class FlakyDoorOpener(Node):
             Empty, '/door_open', self.handle_command, 1)
         self.torque = 0
         self.torque_counter = 0
+        self.opened = 0
+        self.times = 0
 
     def handle_command(self, _):
         if self.torque == 0:
             self.torque = random.choice([1.0, 0.0, 0.0, 0.0, 0.0]) * max_torque
+
             self.torque_counter = 0
         elif self.torque_counter < torque_hold:
             self.torque_counter += 1
@@ -29,6 +32,9 @@ class FlakyDoorOpener(Node):
             self.torque = 0.0
         self.log.info(f'door open requested using torque {self.torque}')
         self.pub_torque.publish(Float64(data=self.torque))
+        if self.torque == max_torque: self.opened +=1
+        self.times +=1
+        self.log.info(f"Current Probability of door openning: {self.opened / self.times}")
 
     def spin(self):
         rclpy.spin(self)
