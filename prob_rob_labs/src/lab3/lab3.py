@@ -5,12 +5,12 @@ from std_msgs.msg import Float64
 from geometry_msgs.msg import Twist
 from std_msgs.msg import Empty
 
+heartbeat_period = 0.01
 class Lab3(Node):
-
     def __init__(self):
         super().__init__('lab3')
         self.log = self.get_logger()
-        # self.timer = self.create_timer(heartbeat_period, self.heartbeat)
+        self.timer = self.create_timer(heartbeat_period, self.heartbeat)
         self.feature_sub_ = self.create_subscription(Float64, "/feature_mean", self.step, 10)
         self.torque_pub_ = self.create_publisher(Float64, "/hinged_glass_door/torque", 10)
         self.vel_pub_ = self.create_publisher(Twist, "/cmd_vel", 10)
@@ -22,23 +22,28 @@ class Lab3(Node):
         self.declare_parameter('horizon', 1000)
         self.horizon = self.get_parameter('horizon').get_parameter_value().integer_value
 
+        # Pass collect_data:=1 for Assignment 5
         self.declare_parameter('collect_data', 0)
         self.collect_data = self.get_parameter('collect_data').get_parameter_value().integer_value
 
+        # Pass flaky_door:=1 for Assignment 8
         self.declare_parameter('flaky_door', 0)
         self.flaky_door = self.get_parameter('flaky_door').get_parameter_value().integer_value
+
+        # No flags on launch file is the solution to Assignment 6
+
         self.z_given_x_closed = []
         self.z_given_x_open = []
         self.count = 0
         self.trials = 0
-        
+
         if self.collect_data == 1:
             self.state = "measure"
             self.P_z_closed_x_closed = 0
             self.P_z_open_x_closed = 0
             self.P_z_open_x_open = 0
             self.P_z_closed_x_open = 0
-            self.log.info(f"Starting measuring with horizon:{self.horizon}, threshold:{self.threshold} ")
+            self.log.info(f"Starting measuring with horizon:{self.horizon}, threshold:{self.threshold}")
 
         else:
             self.state = "control"
@@ -52,6 +57,7 @@ class Lab3(Node):
 
         self.measurement_model = np.array([[self.P_z_open_x_open, self.P_z_open_x_closed],
                                            [self.P_z_closed_x_open, self.P_z_closed_x_closed]])
+        self.measurement = 0.0
 
         if self.flaky_door == 0:
             self.prediction_model = np.array([[1.0, 0.0],
@@ -63,17 +69,42 @@ class Lab3(Node):
         self.log.info(f"Using measurement model: {self.measurement_model}")
         self.log.info(f"Using prediction model:  {self.prediction_model}")
 
+        def heartbeat(self):
+
+            if self.state == "control":
+                if self.measurement >= self.threshold:
+                    self.z = 1  # closed is 1
+                else:
+                    self.z = 0  # open is 0
+
+                self.push_door(5.0)
+                self.bayes_update(self.z)
+
+                if self.bel[0] > 0.99:
+                    self.state = "drive"
+                    self.count = 0
+
+            elif self.state == "drive":
+                if self.count < 60:
+                    self.drive_bot(1.0)
+                else:
+                    self.drive_bot(0.0)
+                    rclpy.shutdown()
+
+            elif self.state == "finished":
+                self.log.info("I did everything I was supposed to, shutting down!")
+                rclpy.shutdown()
+
     def step(self, msg):
         self.count += 1
-        measurement = msg.data
-
+        self.measurement = msg.data
         if self.state == "measure":
             if self.trials == 5:
                 self.log.info("Measurement phase ended, publishing findings")
                 self.move_door(-5.0)
                 if self.count > 50:
                     self.calculate_probabilities()
-                    self.state = "decision"
+                    self.state = "finished"
                     self.count = 0
 
             if self.state == "closed":
@@ -82,7 +113,7 @@ class Lab3(Node):
                     self.state = "opening"
                     self.count = 0
                 else:
-                    self.z_given_x_closed.append(measurement)
+                    self.z_given_x_closed.append(self.measurement)
 
             elif self.state == "opening":
                 self.push_door(5.0)
@@ -97,7 +128,7 @@ class Lab3(Node):
                     self.state = "closing"
                     self.count = 0
                 else:
-                    self.z_given_x_open.append(measurement)
+                    self.z_given_x_open.append(self.measurement)
 
             elif self.state == "closing":
                 self.push_door(-5.0)
@@ -106,32 +137,6 @@ class Lab3(Node):
                     self.count = 0
                     self.log.info(f"Door is closed, finished trial numer:{self.trials}, starting new trial")
                     self.trials +=1
-
-        elif self.state == "control":
-            if measurement > self.threshold:
-                self.z = 1 # closed is 1
-            else:
-                self.z = 0 # open is 0
-
-            if self.bel[0] < 0.9:
-                self.push_door(5.0) # if low confidence on the door being open, open it
-                self.state = "pushing"
-            
-            if self.bel[0] > 0.999:
-                self.state = "drive"
-                self.count = 0
-
-        elif self.state == "drive":
-            if self.count < 60:
-                self.drive_bot(1.0)
-            else:
-                self.push_door(-5.0)
-                self.drive_bot(0.0)
-                rclpy.shutdown()
-        
-        else:
-            self.log.info("I do not know what to do!")
-            rclpy.shutdown()
 
     def push_door(self, value):
         if self.flaky_door:
@@ -147,13 +152,7 @@ class Lab3(Node):
         self.vel_pub_.publish(vel_msg)
 
     def bayes_update(self, z):
-        if self.bel[0] < 0.90: # take an action
-            self.push_door(5.0)
-            bel_bar = self.prediction_model @ self.bel
-        else:
-            # no action
-            bel_bar = np.identity(2, dtype=int) @ self.bel
-
+        bel_bar = self.prediction_model @ self.bel
         unnormalized_posterior = self.measurement_model[z, :] * bel_bar.flatten()
         posterior = unnormalized_posterior / sum(unnormalized_posterior)
         self.bel = np.array([posterior]).transpose()
