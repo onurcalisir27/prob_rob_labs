@@ -5,7 +5,8 @@ from std_msgs.msg import Float64
 from geometry_msgs.msg import Twist
 from std_msgs.msg import Empty
 
-heartbeat_period = 0.01
+heartbeat_period = 0.5
+
 class Lab3(Node):
     def __init__(self):
         super().__init__('lab3')
@@ -19,7 +20,7 @@ class Lab3(Node):
         self.declare_parameter('threshold', 235.0)
         self.threshold = self.get_parameter('threshold').get_parameter_value().double_value
 
-        self.declare_parameter('horizon', 1000)
+        self.declare_parameter('horizon', 500)
         self.horizon = self.get_parameter('horizon').get_parameter_value().integer_value
 
         # Pass collect_data:=1 for Assignment 5
@@ -31,14 +32,14 @@ class Lab3(Node):
         self.flaky_door = self.get_parameter('flaky_door').get_parameter_value().integer_value
 
         # No flags on launch file is the solution to Assignment 6
-
         self.z_given_x_closed = []
         self.z_given_x_open = []
         self.count = 0
         self.trials = 0
-
+        
         if self.collect_data == 1:
-            self.state = "measure"
+            self.task = "measure"
+            self.state = "closed"
             self.P_z_closed_x_closed = 0
             self.P_z_open_x_closed = 0
             self.P_z_open_x_open = 0
@@ -46,11 +47,12 @@ class Lab3(Node):
             self.log.info(f"Starting measuring with horizon:{self.horizon}, threshold:{self.threshold}")
 
         else:
-            self.state = "control"
-            self.P_z_closed_x_closed = 0.9812
-            self.P_z_open_x_closed = 0.0188
-            self.P_z_open_x_open = 0.936
-            self.P_z_closed_x_open = 0.064
+            self.task = "control"
+            self.state = "update"
+            self.P_z_closed_x_closed = 0.9924
+            self.P_z_open_x_closed = 0.0076
+            self.P_z_open_x_open = 0.8592
+            self.P_z_closed_x_open = 0.1408
 
         self.bel = np.array([[0.5], # open
                             [0.5]]) # closed
@@ -63,49 +65,51 @@ class Lab3(Node):
             self.prediction_model = np.array([[1.0, 0.0],
                                               [0.0, 1.0]])
         else:
-            self.prediction_model = np.array([[1.0, 0.72],
-                                              [0.0, 0.28]])
+            self.prediction_model = np.array([[1.0, 0.6875],
+                                              [0.0, 0.3125]])
 
         self.log.info(f"Using measurement model: {self.measurement_model}")
         self.log.info(f"Using prediction model:  {self.prediction_model}")
 
-        def heartbeat(self):
-
-            if self.state == "control":
+    def heartbeat(self):
+        if self.task == "control":
+            if self.state == "update":
                 if self.measurement >= self.threshold:
+                    self.log.info(f"I measured closed! {self.measurement}")
                     self.z = 1  # closed is 1
                 else:
                     self.z = 0  # open is 0
+                    self.log.info(f"I measured open! {self.measurement}")
 
                 self.push_door(5.0)
                 self.bayes_update(self.z)
 
-                if self.bel[0] > 0.99:
+                if self.bel[0] > 0.999:
                     self.state = "drive"
                     self.count = 0
 
             elif self.state == "drive":
-                if self.count < 60:
+                if self.count < 120:
                     self.drive_bot(1.0)
                 else:
                     self.drive_bot(0.0)
-                    rclpy.shutdown()
+                    self.task = "finished"
 
-            elif self.state == "finished":
-                self.log.info("I did everything I was supposed to, shutting down!")
-                rclpy.shutdown()
+        elif self.task == "finished":
+            self.log.info("I did everything I was supposed to, shutting down!")
+            rclpy.shutdown()
 
     def step(self, msg):
         self.count += 1
         self.measurement = msg.data
-        if self.state == "measure":
+
+        if self.task == "measure":
             if self.trials == 5:
-                self.log.info("Measurement phase ended, publishing findings")
-                self.move_door(-5.0)
-                if self.count > 50:
-                    self.calculate_probabilities()
-                    self.state = "finished"
-                    self.count = 0
+                self.log.info("Measurement task ended, publishing findings")
+                self.push_door(-5.0)
+                self.calculate_probabilities()
+                self.task = "finished"
+                self.count = 0
 
             if self.state == "closed":
                 if self.count > self.horizon:
@@ -195,6 +199,8 @@ class Lab3(Node):
 
         self.measurement_model = np.array([[self.P_z_open_x_open, self.P_z_open_x_closed],
                                            [self.P_z_closed_x_open, self.P_z_closed_x_closed]])
+        
+        self.log.info(f"So the measurement model is given by the following matrix:{self.measurement_model}")
 
     def spin(self):
         rclpy.spin(self)

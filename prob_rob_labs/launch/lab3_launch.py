@@ -10,10 +10,10 @@ def generate_launch_description():
     return LaunchDescription([
         DeclareLaunchArgument('use_sim_time', default_value='true',
                               description='set to true for simulation'),
-        DeclareLaunchArgument('horizon', default_value='500', description="Averaging Horizon"),
-        DeclareLaunchArgument('threshold', default_value='235.0', description='Trigger Threshold'),
+        DeclareLaunchArgument('horizon', default_value='500', description="Data Sampling Horizon"),
+        DeclareLaunchArgument('threshold', default_value='235.0', description='Door State Open/Close Trigger Threshold'),
         DeclareLaunchArgument('flaky_door', default_value='0', description='Boolean flag to set the uncertainty of the door opener'),
-        DeclareLaunchArgument('collect_data', default_value='0', description='Boolean flag to set the robot state to "measure" or "decision"'),
+        DeclareLaunchArgument('collect_data', default_value='0', description='Boolean flag to set the robot state to "measure" or "control"'),
         Node(
             package='prob_rob_labs',
             executable='lab3',
