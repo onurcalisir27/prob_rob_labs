@@ -33,6 +33,7 @@ setup(
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
+            'lab4_ekf = lab4_ekf.lab4_ekf:main',
             'lab4 = lab4.lab4:main',
             'lab3 = lab3.lab3:main',
             'lab2 = lab2.lab2:main',
