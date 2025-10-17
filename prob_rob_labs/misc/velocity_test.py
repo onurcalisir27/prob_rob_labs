@@ -1,4 +1,4 @@
-import numpy
+import numpy as np
 import matplotlib.pyplot as plt
 
 ''''
@@ -29,9 +29,28 @@ for i in range(len(all_t)):
     speed = next_speed(speed, input)
     list_speed.append(speed)
 
-plt.figure(1)
-plt.plot(all_t, list_speed)
-plt.grid()
-plt.show()
+# plt.figure(1)
+# plt.plot(all_t, list_speed)
+# plt.grid()
+# plt.show()
+#
 
+a = 0.9
+b = 0.7
+dt = 0.1
+# [theta, x, y, v, w]
+state = np.zeros((5,1))
+print(f"State :\n{state}")
+state = np.array([[np.pi/3], [1.0], [1.0], [0.5], [1.0]])
+print(f"State :\n{state}")
 
+F = np.array([[1.0, 0.0, 0.0, 0.0, dt],
+                   [-dt*state[3,0]*np.sin(state[0,0]), 1.0, 0.0, dt*np.cos(state[0,0]), 0.0],
+                   [dt*state[3,0]*np.cos(state[0,0]), 0.0, 1.0, dt*np.sin(state[0,0]), 0.0],
+                   [0.0, 0.0, 0.0, a, 0.0],
+                   [0.0, 0.0, 0.0, 0.0, b]
+                   ])
+print(f"F matrix:\n{F}")
+
+wheel_r = 33e-3
+print(f"Wheel R is {wheel_r} mm")
