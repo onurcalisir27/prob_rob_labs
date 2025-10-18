@@ -54,3 +54,8 @@ print(f"F matrix:\n{F}")
 
 wheel_r = 33e-3
 print(f"Wheel R is {wheel_r} mm")
+
+
+covariance = np.identity(5) * 0.1
+print(f"Covariance matrix: \n{covariance}")
+

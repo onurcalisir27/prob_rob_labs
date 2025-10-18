@@ -3,9 +3,14 @@ from rclpy.node import Node
 import numpy as np
 from sensor_msgs.msg import Imu
 from sensor_msgs.msg import JointState
+from nav_msgs.msg import Odometry
+from geometry_msgs.msg import Twist
 from message_filters import Subscriber, ApproximateTimeSynchronizer
-
+from tf_transformations import quaternion_from_euler
+from geometry_msgs.msg import Quaternion
+from std_msgs.msg import Header
 from rclpy.clock import Clock
+
 heartbeat_period = 0.1
 dt = 0.1
 
@@ -17,16 +22,18 @@ class Lab4Ekf(Node):
         self.timer = self.create_timer(heartbeat_period, self.heartbeat)
 
         self.imu_sub = Subscriber(self, Imu, "/imu")
-        self.joints_pub = Subscriber(self, JointState, "/joint_states")
+        self.joints_sub = Subscriber(self, JointState, "/joint_states")
+        self.cmd_sub = Subscriber(self, Twist, "/cmd_vel")
 
-        self.timer = self.create_timer(1, self.TimerCallback)
+        self.input_sub = self.create_subscription(Twist, "/cmd_vel", self.input_callback, 10)
+        self.odom_pub = self.create_publisher(Odometry, "/ekf_odom", 10)
 
         queue_size = 10
-        max_delay = 0.05
+        slop = 0.05
         self.time_sync = ApproximateTimeSynchronizer([self.imu_sub,
-                                                      self.joints_pub],
+                                                      self.joints_sub],
                                                      queue_size,
-                                                     max_delay)
+                                                     slop)
 
         self.time_sync.registerCallback(self.SyncCallback)
 
@@ -35,21 +42,79 @@ class Lab4Ekf(Node):
         self.a = 0.9
         self.b = 0.7
 
-        # [theta, x, y, v, w]
+        # State : [theta, x, y, v, w]^T
         self.state = np.zeros((5, 1))
-        self.F = np.array([[1.0, 0.0, 0.0, 0.0, dt],
+
+        self.declare_parameter("initial_covariance", 0.1)
+        initial_covariance = self.get_parameter("initial_covariance").get_parameter_value().double_value
+        self.Cov = initial_covariance * np.identity(5)
+
+        # State Transition Jacobian :
+        self.G = np.array([[1.0, 0.0, 0.0, 0.0, dt],
                            [-dt*self.state[3, 0]*np.sin(self.state[0, 0]),
                             1.0, 0.0, dt*np.cos(self.state[0, 0]), 0.0],
-                           [dt*self.state[3, 0]*np.cos(self.state[0, 0]), 0.0,
-                            1.0, dt*np.sin(self.state[0, 0]), 0.0],
+                           [dt*self.state[3, 0]*np.cos(self.state[0, 0]),
+                            0.0, 1.0, dt*np.sin(self.state[0, 0]), 0.0],
                            [0.0, 0.0, 0.0, self.a, 0.0],
-                           [0.0, 0.0, 0.0, 0.0, self.b]
-                           ])
-        # [uv, uw]
+                           [0.0, 0.0, 0.0, 0.0, self.b]])
+        # Input : [uv, uw]
         self.u = np.zeros((2, 1))
+
+        # Input covariance and B matrix
+        self.B = np.array([[0.0, 0.0],
+                           [0.0, 0.0],
+                           [0.0, 0.0],
+                           [1-self.a, 0.0],
+                           [0.0, 1-self.b]])
+
+        sigma_u = np.array([[0.05, 0.0],
+                            [0.0, 0.05]])
+        self.R = self.B @ sigma_u @ self.B.T
+
+        # Turtlebot params
+        self.wheel_r = 33e-3
+        self.wheel_R = 143.5e-3 / 2.0
+        # z = C x
+        # z = [wr, wl, wg]^T
+        self.C = np.array([
+            [0.0, 0.0, 0.0, 1/self.wheel_r, self.wheel_R/self.wheel_r],
+            [0.0, 0.0, 0.0, 1/self.wheel_r, -self.wheel_R/self.wheel_r],
+            [0.0, 0.0, 0.0, 0.0, 1.0]])
+
+        self.Sigma_z = np.array([[0.5, 0.0, 0.0],
+                                 [0.0, 0.5, 0.0],
+                                 [0.0, 0.0, 0.1]])
+
+    def SyncCallback(self, imu, encoders):
+        imu_timestamp = imu.header.stamp.sec
+        encoder_timestamp = encoders.header.stamp.sec
+
+        self.log.info(f"Received IMU message at:{imu_timestamp} seconds, \
+        encoders message at:{encoder_timestamp} seconds")
+
+        right = encoders.name.index("right_wheel_joint")
+        left = encoders.name.index("left_wheel_joint")
+
+        wr = encoders.velocity[right]
+        wl = encoders.velocity[left]
+        wg = imu.angular_velocity.z
+
+        z = np.array([[wr],
+                      [wl],
+                      [wg]])
+
+        self.Sigma_z[2, 2] = imu.angular_velocity_covariance[-1]
+
+        self.state_update()
+        self.measurement_update(z)
+        self.publish_odom(encoder_timestamp)
 
     def heartbeat(self):
         self.log.info('heartbeat')
+
+    def input_callback(self, msg):
+        self.u[0, 0] = msg.linear.x
+        self.u[1, 0] = msg.angular.z
 
     def state_update(self):
         '''
@@ -58,46 +123,82 @@ class Lab4Ekf(Node):
         x[n] = x[n-1] + v_x * dt * cos(theta[n-1])
         y[n] = y[n-1] + v_x * dt * sin(theta[n-1])
         theta[n] = theta[n-1] + w * dt
-
-        v[n] = a * v[n-1] + (1-a) * uv[n-1]
+        v[n] = a * v[n-1] + (2-a) * uv[n-1]
         w[n] = b * w[n-1] + (1-b) * uw[n-1]
 
         '''
+        # update state and jacobian
+        self.G[1, 0] = -dt*self.state[3, 0]*np.sin(self.state[0, 0])
+        self.G[1, 3] = dt*np.cos(self.state[0, 0])
+        self.G[2, 0] = dt*self.state[3, 0]*np.cos(self.state[0, 0])
+        self.G[2, 3] = dt*np.sin(self.state[0, 0])
 
-        # X Y Theta
+        # update x and y with old theta and v
         self.state[1, 0] = self.state[1, 0] +  \
             self.state[3, 0] * dt * np.cos(self.state[0, 0])
         self.state[2, 0] = self.state[2, 0] + \
             self.state[3, 0] * dt * np.sin(self.state[0, 0])
         self.state[0, 0] = self.state[0, 0] + self.state[4, 0] * dt
-        # Vx W
         self.state[3, 0] = self.a * self.state[3, 0] + \
             (1.0-self.a) * self.u[0, 0]
         self.state[4, 0] = self.b * self.state[4, 0] + \
             (1.0-self.b) * self.u[1, 0]
 
-        self.F[1, 0] = 1.0
-        self.F[1,]
-        self.F[2, 0] = 1.0
+        # update covariance
+        self.Cov = self.G @ self.Cov @ self.G.T + self.R
 
-    def measurement_model(self, z):
-        # z = [wr, wl, wg]
-        self.wheel_r = 33e-3
-        self.wheel_s = 143.5e-3
+    def measurement_update(self, z):
 
-        v = 0.5 * self.wheel_r * (z[0, 0] + z[1, 0])
-        w = 0.5 * self.wheel_r / self.wheel_s * (z[0, 0] - z[1, 0])
+        innovation = z - self.C @ self.state
+        K = self.kalman_gain()
+        self.state = self.state + K @ innovation
+        self.Cov = (np.identity(5) - K @ self.C) @ self.Cov
 
-        # z = C x
-        return v, w
+    def kalman_gain(self):
 
-    def SyncCallback(self, imu, joint_states):
-        temp_sec = imu.header.stamp.sec
-        fluid_sec = joint_states.header.stamp.sec
-        self.get_logger().info(f'Sync callback with {temp_sec} and {fluid_sec} as times')
+        temp = self.C @ self.Cov @ self.C.T + self.Sigma_z
+        return self.Cov @ self.C.T @ np.linalg.inv(temp)
 
-        if (imu.header.stamp.sec > 2.0):
-            return
+    def publish_odom(self, timestamp):
+        odom_msg = Odometry()
+        odom_msg.header.stamp = timestamp
+        odom_msg.header.frame_id = "odom"
+        odom_msg.child_frame_id = "base_footprint"
+
+        odom_msg.pose.pose.position.x = self.state[1, 0]
+        odom_msg.pose.pose.position.y = self.state[2, 0]
+
+        odom_msg.pose.pose.orientation = self.to_quaternion(self.state[0, 0])
+
+        odom_msg.pose.covariance[0] = self.Cov[1, 1]
+        odom_msg.pose.covariance[1] = self.Cov[1, 2]
+        odom_msg.pose.covariance[5] = self.Cov[1, 0]
+        odom_msg.pose.covariance[6] = self.Cov[2, 1]
+        odom_msg.pose.covariance[7] = self.Cov[2, 2]
+        odom_msg.pose.covariance[11] = self.Cov[2, 0]
+        odom_msg.pose.covariance[30] = self.Cov[0, 1]
+        odom_msg.pose.covariance[31] = self.Cov[0, 2]
+        odom_msg.pose.covariance[35] = self.Cov[0, 0]
+
+        odom_msg.twist.twist.linear.x = self.state[3, 0]
+        odom_msg.twist.twist.angular.z = self.state[4, 0]
+
+    def unwrap(self, angle):
+        while angle > np.pi:
+            angle = angle - (2 * np.pi)
+        while angle < -np.pi:
+            angle = angle + (2 * np.pi)
+        return angle
+
+    def to_quaternion(self, theta):
+
+        quaternions = quaternion_from_euler(0.0, 0.0, theta)
+        q = Quaternion()
+        q.x = quaternions[0]
+        q.y = quaternions[1]
+        q.z = quaternions[2]
+        q.w = quaternions[3]
+        return q
 
     def spin(self):
         rclpy.spin(self)
