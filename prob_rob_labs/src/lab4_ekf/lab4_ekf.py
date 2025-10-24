@@ -39,13 +39,14 @@ class Lab4Ekf(Node):
 
         # Assignment 3 Findings
         # self.G = 1
-        self.a = 0.9
-        self.b = 0.7
+        self.a = 0.8
+        self.b = 0.3
 
         # State : [theta, x, y, v, w]^T
         self.state = np.zeros((5, 1))
 
-        self.declare_parameter("initial_covariance", 0.1)
+        # This should also be somewhat tunable
+        self.declare_parameter("initial_covariance", 0.001)
         initial_covariance = self.get_parameter("initial_covariance").get_parameter_value().double_value
         self.Cov = initial_covariance * np.identity(5)
 
@@ -124,7 +125,7 @@ class Lab4Ekf(Node):
         x[n] = x[n-1] + v_x * dt * cos(theta[n-1])
         y[n] = y[n-1] + v_x * dt * sin(theta[n-1])
         theta[n] = theta[n-1] + w * dt
-        v[n] = a * v[n-1] + (2-a) * uv[n-1]
+        v[n] = a * v[n-1] + (1-a) * uv[n-1]
         w[n] = b * w[n-1] + (1-b) * uw[n-1]
 
         '''

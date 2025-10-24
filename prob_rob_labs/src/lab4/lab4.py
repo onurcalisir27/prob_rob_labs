@@ -24,7 +24,7 @@ class Lab4(Node):
         self.declare_parameter('reference_frame', "odom")
         self.reference_frame = self.get_parameter('reference_frame').get_parameter_value().string_value
 
-        self.log.info("Ground truth publisher is started publishin")
+        self.log.info("Ground truth publisher is started publishing")
 
     def heartbeat(self):
         # self.log.info("Heartbeat")
