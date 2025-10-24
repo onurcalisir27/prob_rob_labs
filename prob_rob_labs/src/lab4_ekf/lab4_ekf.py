@@ -67,13 +67,16 @@ class Lab4Ekf(Node):
                            [1-self.a, 0.0],
                            [0.0, 1-self.b]])
 
+        # TUNABLE-ish
         sigma_u = np.array([[0.05, 0.0],
                             [0.0, 0.05]])
+        
         self.R = self.B @ sigma_u @ self.B.T
 
         # Turtlebot params
         self.wheel_r = 33e-3
         self.wheel_R = 143.5e-3 / 2.0
+
         # z = C x
         # z = [wr, wl, wg]^T
         self.C = np.array([
@@ -81,19 +84,17 @@ class Lab4Ekf(Node):
             [0.0, 0.0, 0.0, 1/self.wheel_r, -self.wheel_R/self.wheel_r],
             [0.0, 0.0, 0.0, 0.0, 1.0]])
 
-        self.Sigma_z = np.array([[0.5, 0.0, 0.0],
-                                 [0.0, 0.5, 0.0],
-                                 [0.0, 0.0, 0.1]])
+        # From the /imu message, the covariance of the imu angular velocity reading is 4.0e-08
+        self.Sigma_z = np.array([[0.0005, 0.0, 0.0],
+                                 [0.0, 0.0005, 0.0],
+                                 [0.0, 0.0, 4.0e-08]])
 
     def SyncCallback(self, imu, encoders):
-        imu_timestamp = imu.header.stamp.sec
-        encoder_timestamp = encoders.header.stamp.sec
+        imu_timestamp = imu.header.stamp
+        encoder_timestamp = encoders.header.stamp
 
-        self.log.info(f"Received IMU message at:{imu_timestamp} seconds, \
-        encoders message at:{encoder_timestamp} seconds")
-
-        right = encoders.name.index("right_wheel_joint")
-        left = encoders.name.index("left_wheel_joint")
+        right = encoders.name.index("wheel_right_joint")
+        left = encoders.name.index("wheel_left_joint")
 
         wr = encoders.velocity[right]
         wl = encoders.velocity[left]
@@ -102,8 +103,8 @@ class Lab4Ekf(Node):
         z = np.array([[wr],
                       [wl],
                       [wg]])
-
-        self.Sigma_z[2, 2] = imu.angular_velocity_covariance[-1]
+        
+        self.log.info(f"Received Measurement z: \n{z}")
 
         self.state_update()
         self.measurement_update(z)
@@ -138,7 +139,9 @@ class Lab4Ekf(Node):
             self.state[3, 0] * dt * np.cos(self.state[0, 0])
         self.state[2, 0] = self.state[2, 0] + \
             self.state[3, 0] * dt * np.sin(self.state[0, 0])
+        
         self.state[0, 0] = self.state[0, 0] + self.state[4, 0] * dt
+
         self.state[3, 0] = self.a * self.state[3, 0] + \
             (1.0-self.a) * self.u[0, 0]
         self.state[4, 0] = self.b * self.state[4, 0] + \
@@ -182,6 +185,8 @@ class Lab4Ekf(Node):
 
         odom_msg.twist.twist.linear.x = self.state[3, 0]
         odom_msg.twist.twist.angular.z = self.state[4, 0]
+
+        self.odom_pub.publish(odom_msg)
 
     def unwrap(self, angle):
         while angle > np.pi:
