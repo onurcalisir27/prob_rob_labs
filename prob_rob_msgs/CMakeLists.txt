@@ -12,6 +12,8 @@ find_package(rosidl_default_generators REQUIRED)
 set(msg_files
   "msg/Point2D.msg"
   "msg/Point2DArrayStamped.msg"
+  "msg/Distance2D.msg"
+  "msg/Distance2DArrayStamped.msg"
 )
 
 rosidl_generate_interfaces(${PROJECT_NAME}
