@@ -36,7 +36,7 @@ class Lab4Ekf(Node):
         # Assignment 3 Findings
         # G ~ 1
         self.tau_a = 0.5
-        self.tau_b = 1.5
+        self.tau_b = 0.15
 
         self.a = 0.1 ** (dt_gt / self.tau_a)
         self.b = 0.1 ** (dt_gt / self.tau_b)
@@ -68,8 +68,8 @@ class Lab4Ekf(Node):
                            [0.0, 1-self.b]])
 
         # We usually know what we commanded
-        self.Sigma_u = np.array([[0.1, 0.0],
-                                [0.0, 0.1]])
+        self.Sigma_u = np.array([[0.05, 0.0],
+                                [0.0, 0.05]])
         
         self.R = self.B @ self.Sigma_u @ self.B.T
 
@@ -87,7 +87,7 @@ class Lab4Ekf(Node):
         # Imu is noisier than encoders, so trust encoders a little more
         self.Sigma_z = np.array([[0.005, 0.0, 0.0],
                                  [0.0, 0.005, 0.0],
-                                 [0.0, 0.0, 0.001]])
+                                 [0.0, 0.0, 0.0001]])
 
     def SyncCallback(self, imu, encoders):
         imu_timestamp = imu.header.stamp
