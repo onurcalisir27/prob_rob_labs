@@ -7,7 +7,7 @@ from geometry_msgs.msg import TwistStamped
 from geometry_msgs.msg import PoseStamped
 
 
-heartbeat_period = 0.1
+heartbeat_period = 1.0/ 30.0
 
 class Lab4(Node):
 

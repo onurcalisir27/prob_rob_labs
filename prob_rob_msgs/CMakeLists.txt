@@ -14,6 +14,7 @@ set(msg_files
   "msg/Point2DArrayStamped.msg"
   "msg/Distance2D.msg"
   "msg/Distance2DArrayStamped.msg"
+  "msg/Odom2D.msg"
 )
 
 rosidl_generate_interfaces(${PROJECT_NAME}

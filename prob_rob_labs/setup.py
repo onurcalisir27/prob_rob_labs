@@ -15,6 +15,7 @@ data_files=[
     ('share/' + package_name, ['package.xml']),
     (os.path.join('share', package_name, 'worlds'), glob('worlds/*.world')),
     (os.path.join('share', package_name, 'config'), glob('config/*.yaml')),
+    (os.path.join('share', package_name, 'rviz'), glob('rviz/*.rviz')),
     (os.path.join('share', package_name, 'launch'), launch_files),
 ]
 
@@ -33,6 +34,7 @@ setup(
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
+            'lab4_odom_error = lab4_odom_error.lab4_odom_error:main',
             'vision_processor = vision_processor.vision_processor:main',
             'lab4_ekf = lab4_ekf.lab4_ekf:main',
             'lab4 = lab4.lab4:main',
