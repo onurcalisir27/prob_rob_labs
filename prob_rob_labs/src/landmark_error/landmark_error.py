@@ -1,6 +1,5 @@
 import rclpy
 from rclpy.node import Node
-import math
 from message_filters import Subscriber, ApproximateTimeSynchronizer
 from prob_rob_msgs.msg import Landmark
 import csv
@@ -37,9 +36,11 @@ class LandmarkError(Node):
             'range_error', 'bearing_error'
         ])
 
+        self.create_timer(1.0, self.flush_csv)
+
     def SyncCallback(self, landmark_gt, landmark):
 
-        self.distance_error = abs(landmark_gt.distance - landmark.distance)
+        self.distance_error = landmark_gt.distance - landmark.distance
         self.bearing_error = landmark_gt.bearing - landmark.bearing
 
         self.log.info(f"The measured distance to the landmark was: {landmark.distance} which was off by {self.distance_error}")
@@ -57,15 +58,21 @@ class LandmarkError(Node):
              self.bearing_error
         ])
 
+    def flush_csv(self):
+        self.csv_file.flush()
 
     def spin(self):
         rclpy.spin(self)
+
+    def destroy(self):
+        self.csv_file.close()
+        super().destroy_node()
 
 def main():
     rclpy.init()
     landmark_error = LandmarkError()
     landmark_error.spin()
-    landmark_error.destroy_node()
+    landmark_error.destroy()
     rclpy.shutdown()
 
 
