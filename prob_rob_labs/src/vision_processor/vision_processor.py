@@ -4,7 +4,7 @@ from sensor_msgs.msg import CameraInfo
 from prob_rob_msgs.msg import Point2DArrayStamped
 from prob_rob_msgs.msg import Distance2D
 import numpy
-
+from std_msgs.msg import Header
 heartbeat_period = 0.1
 
 class VisionProcessor(Node):
@@ -42,7 +42,7 @@ class VisionProcessor(Node):
     def __init__(self):
         super().__init__('vision_processor')
         self.log = self.get_logger()
-        self.timer = self.create_timer(heartbeat_period, self.heartbeat)
+        # self.timer = self.create_timer(heartbeat_period, self.heartbeat)
 
         self.camera_info_sub = self.create_subscription(CameraInfo, "/camera/camera_info", self.camera_info_callback, 10)
         self.cyan_points_sub = self.create_subscription(Point2DArrayStamped, "/vision_cyan/corners", self.cyan_callback, 10)
@@ -51,13 +51,15 @@ class VisionProcessor(Node):
         
         self.declare_parameter("true_height", 0.5)
         self.true_height = self.get_parameter("true_height").get_parameter_value().double_value
+        self.true_width = 2*0.1
+        self.true_ratio = self.true_height / self.true_width
 
         self.distance_ave = 0
         self.theta_ave = 0
         self.run = 0
         
-    def heartbeat(self):
-        self.log.info('heartbeat')
+    # def heartbeat(self):
+        # self.log.info('heartbeat')
 
     def camera_info_callback(self, msg):
 
@@ -72,8 +74,7 @@ class VisionProcessor(Node):
     def cyan_callback(self, msg):
         if len(msg.points) != 0: 
             points = msg.points 
-            self.log.info(f"Number of points: {len(points)}")
-
+            # self.log.info(f"Number of points: {len(points)}")
             x = []
             y = []
             for point in points:
@@ -85,7 +86,17 @@ class VisionProcessor(Node):
             y_min = min(y)
             y_max = max(y)
 
+            epsilon = 1e-4
             height = y_max - y_min
+            width = x_max - x_min
+            self.ratio = height / (width + epsilon)
+
+            threshold1 = 1.5
+            threshold2 = 0.7
+            if self.ratio > self.true_ratio * threshold1 or self.ratio < self.true_ratio * threshold2:
+                self.log.info(f"Measurement is offending the model, the measured ration is off by {self.ratio/self.true_ratio}")
+                return
+
             center_x = 0.5*(x_max + x_min)
             center_y = 0.5*(y_max + y_min)
 
@@ -94,14 +105,11 @@ class VisionProcessor(Node):
             tmp = (self.cx -center_x) / self.fx
             theta = numpy.arctan(tmp)
             d = self.true_height * self.fy / (height * numpy.cos(theta))
-            self.publish_filtered_landmark(theta, d)
+            timestamp = Header()
+            timestamp.frame_id = "camera_link"
+            timestamp.stamp = self.get_clock().now().to_msg()
+            self.landmark_pub.publish(Distance2D(header=timestamp, distance=d, bearing=theta))
 
-    def publish_filtered_landmark(self, theta, d):
-        self.run += 1
-        self.theta_ave = (self.theta_ave + theta) / (self.run)
-        self.distance_ave = (self.distance_ave + d) / (self.run)
-        self.landmark_pub.publish(Distance2D(distance=self.distance_ave, bearing=self.theta_ave))
-        
     def spin(self):
         rclpy.spin(self)
 
