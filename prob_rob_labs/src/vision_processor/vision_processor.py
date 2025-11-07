@@ -16,6 +16,11 @@ class VisionProcessor(Node):
         self.declare_parameter("landmark_color", 'cyan')
         self.landmark_color = self.get_parameter("landmark_color").get_parameter_value().string_value
         
+        landmark_color_list = {"red", "green", "yellow", "magenta", "cyan"}
+        if self.landmark_color not in landmark_color_list:
+            self.log.info("User passed incorrect landmark color, please try again")
+            self.destroy_node()
+
         self.camera_info_sub = self.create_subscription(CameraInfo, "/camera/camera_info", self.camera_info_callback, 10)
         self.cyan_points_sub = self.create_subscription(Point2DArrayStamped, "/vision_" + self.landmark_color + "/corners", self.vision_callback, 10)
         self.landmark_pub = self.create_publisher(Landmark, "/landmark", 10)
@@ -35,7 +40,7 @@ class VisionProcessor(Node):
 
     def vision_callback(self, msg):
         # Only process if there are points present
-        if len(msg.points) != 0: 
+        if len(msg.points) > 4: 
             points = msg.points 
             x = []
             y = []
@@ -69,10 +74,7 @@ class VisionProcessor(Node):
             theta = numpy.arctan(tmp)
             d = self.true_height * self.fy / (dy * numpy.cos(theta))
 
-            timestamp = Header()
-            timestamp.frame_id = "camera_link"
-            timestamp.stamp = self.get_clock().now().to_msg()
-            self.landmark_pub.publish(Landmark(header=timestamp, distance=d, bearing=theta, signature=self.landmark_color))
+            self.landmark_pub.publish(Landmark(header=msg.header, distance=d, bearing=theta, signature=self.landmark_color))
 
     def spin(self):
         rclpy.spin(self)
