@@ -3,8 +3,8 @@ from rclpy.node import Node
 import math
 from message_filters import Subscriber, ApproximateTimeSynchronizer
 from prob_rob_msgs.msg import Landmark
-from std_msgs.msg import Header
-heartbeat_period = 0.1
+import csv
+from datetime import datetime
 
 class LandmarkError(Node):
 
@@ -19,13 +19,23 @@ class LandmarkError(Node):
         self.landmark_error_pub = self.create_publisher(Landmark, "/landmark_error", 10)
 
         # Slop is tunable
-        queue_size = 10
+        queue_size = 20
         slop = 0.1
         self.time_sync = ApproximateTimeSynchronizer([self.landmark_gt_sub,
                                                       self.landmark_sub],
                                                      queue_size,
                                                      slop)
         self.time_sync.registerCallback(self.SyncCallback)
+
+        # CSV
+        csv_stamp = datetime.now().strftime("%H%M%S")
+        self.csv_file = open(f'measurement_errors_{csv_stamp}.csv', 'w', newline='')
+        self.csv_writer = csv.writer(self.csv_file)
+        self.csv_writer.writerow([
+            'measured_range', 'measured_bearing',
+            'true range', 'true_bearing',
+            'range_error', 'bearing_error'
+        ])
 
     def SyncCallback(self, landmark_gt, landmark):
 
@@ -37,6 +47,16 @@ class LandmarkError(Node):
 
         timestamp = landmark.header
         self.landmark_error_pub.publish(Landmark(header=timestamp, distance=self.distance_error, bearing=self.bearing_error))
+
+        self.csv_writer.writerow([
+             landmark.distance,
+             landmark.bearing,
+             landmark_gt.distance,
+             landmark_gt.bearing,
+             self.distance_error,
+             self.bearing_error
+        ])
+
 
     def spin(self):
         rclpy.spin(self)

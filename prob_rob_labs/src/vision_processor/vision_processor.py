@@ -14,10 +14,10 @@ class VisionProcessor(Node):
         self.declare_parameter("landmark_height", 0.5)
         self.true_height = self.get_parameter("landmark_height").get_parameter_value().double_value
         self.declare_parameter("landmark_color", 'cyan')
-        landmark_color = self.get_parameter("landmark_color").get_parameter_value().string_value
+        self.landmark_color = self.get_parameter("landmark_color").get_parameter_value().string_value
         
         self.camera_info_sub = self.create_subscription(CameraInfo, "/camera/camera_info", self.camera_info_callback, 10)
-        self.cyan_points_sub = self.create_subscription(Point2DArrayStamped, "/vision_" + landmark_color + "/corners", self.vision_callback, 10)
+        self.cyan_points_sub = self.create_subscription(Point2DArrayStamped, "/vision_" + self.landmark_color + "/corners", self.vision_callback, 10)
         self.landmark_pub = self.create_publisher(Landmark, "/landmark", 10)
         
         self.true_width = 2*0.1
@@ -72,7 +72,7 @@ class VisionProcessor(Node):
             timestamp = Header()
             timestamp.frame_id = "camera_link"
             timestamp.stamp = self.get_clock().now().to_msg()
-            self.landmark_pub.publish(Landmark(header=timestamp, distance=d, bearing=theta))
+            self.landmark_pub.publish(Landmark(header=timestamp, distance=d, bearing=theta, signature=self.landmark_color))
 
     def spin(self):
         rclpy.spin(self)

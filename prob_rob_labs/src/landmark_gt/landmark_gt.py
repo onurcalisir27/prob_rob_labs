@@ -34,10 +34,11 @@ class LandmarkGt(Node):
         landmark_x = self.landmark_pose.position.x   
         landmark_y = self.landmark_pose.position.y
 
-        self.range = math.sqrt((camera_x - landmark_x)**2 + (camera_y - landmark_y)**2)
+        # Substract the cylinder radius from the euclidean distance to the center of the landmark from robot camera
+        self.range = math.sqrt((camera_x - landmark_x)**2 + (camera_y - landmark_y)**2) - 0.1
         self.bearing = math.atan2(landmark_y-camera_y, landmark_x-camera_x) - camera_yaw
 
-        self.log.info(f'True range is {self.range} and true bearing is {self.bearing}')
+        # self.log.info(f'True range is {self.range} and true bearing is {self.bearing}')
 
         self.landmark_gt_pub.publish(Landmark(header=timestamp, distance=self.range, bearing=self.bearing))
 
