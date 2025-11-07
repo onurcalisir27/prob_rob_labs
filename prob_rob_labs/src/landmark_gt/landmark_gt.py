@@ -4,7 +4,7 @@ from gazebo_msgs.msg import LinkStates
 from std_msgs.msg import Header
 from tf_transformations import euler_from_quaternion
 import math
-from prob_rob_msgs.msg import Distance2D
+from prob_rob_msgs.msg import Landmark
 
 class LandmarkGt(Node):
 
@@ -12,7 +12,7 @@ class LandmarkGt(Node):
         super().__init__('landmark_gt')
         self.log = self.get_logger()
         self.gt_sub = self.create_subscription(LinkStates, "/gazebo/link_states", self.gt_callback, 10)
-        self.landmark_gt_pub = self.create_publisher(Distance2D, "/landmark_gt", 10)
+        self.landmark_gt_pub = self.create_publisher(Landmark, "/landmark_gt", 10)
         
 
     def gt_callback(self,msg):
@@ -20,6 +20,7 @@ class LandmarkGt(Node):
         timestamp.frame_id = "camera_link"
         timestamp.stamp = self.get_clock().now().to_msg()
 
+        # Cyan Landmark
         landmark_ind = msg.name.index("landmark_5::link")
         self.landmark_pose = msg.pose[landmark_ind]
 
@@ -38,7 +39,7 @@ class LandmarkGt(Node):
 
         self.log.info(f'True range is {self.range} and true bearing is {self.bearing}')
 
-        self.landmark_gt_pub.publish(Distance2D(header=timestamp, distance=self.range, bearing=self.bearing))
+        self.landmark_gt_pub.publish(Landmark(header=timestamp, distance=self.range, bearing=self.bearing))
 
     def quaternion_to_yaw(self, quaternion):
         euler = euler_from_quaternion([quaternion.x, 

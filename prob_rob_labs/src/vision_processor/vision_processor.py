@@ -2,64 +2,26 @@ import rclpy
 from rclpy.node import Node
 from sensor_msgs.msg import CameraInfo
 from prob_rob_msgs.msg import Point2DArrayStamped
-from prob_rob_msgs.msg import Distance2D
+from prob_rob_msgs.msg import Landmark
 import numpy
 from std_msgs.msg import Header
-heartbeat_period = 0.1
 
 class VisionProcessor(Node):
-    '''
-    Write a ROS node that subscribes to the /camera/camera_info topic and the corner-points topic for a landmark of your choice and calculates the distance and bearing to
-    the landmark. 
-
-    Your node will need to know the landmark height to use it in calculations and the landmark color to know which topic to subscribe to. Both should be the node parameters.
-
-    Publish the calculated distance and bearing. 
-
-    Submit the code.
-
-    Bring up the node and drive the robot around pointing it to the landmark from various distances.
-    
-    Make sure the node handles the case when the landmark goes out of sight (it should stop calculating and publishing the measurement and it may not crash).
-
-    Make sense out of the values you are getting. 
-    
-    You can use the rqt_plot tool to visualize the measurement.
-    
-    Place the robot a few meters away from the landmark and make it face it directly. 
-    
-    Next, start rotating the robot in place and watch the distance measurement plot. 
-    
-    The measurement should remain more or less constant (which is expected), except when the landmark reaches the edge
-    of the cameras field of view. 
-    
-    The reason this happens is that the cornerpoints from one side of the landmark are missing, which may result in incorrect calculation of the symmetry axis, which
-    further skews the bearing measurement, followed by skewing the distance measurement. 
-    
-    If you notice this problem, extend the code to drop the offending measurement.
-    '''
-
     def __init__(self):
         super().__init__('vision_processor')
         self.log = self.get_logger()
-        # self.timer = self.create_timer(heartbeat_period, self.heartbeat)
-
-        self.camera_info_sub = self.create_subscription(CameraInfo, "/camera/camera_info", self.camera_info_callback, 10)
-        self.cyan_points_sub = self.create_subscription(Point2DArrayStamped, "/vision_cyan/corners", self.cyan_callback, 10)
-
-        self.landmark_pub = self.create_publisher(Distance2D, "/landmark", 10)
         
-        self.declare_parameter("true_height", 0.5)
-        self.true_height = self.get_parameter("true_height").get_parameter_value().double_value
+        self.declare_parameter("landmark_height", 0.5)
+        self.true_height = self.get_parameter("landmark_height").get_parameter_value().double_value
+        self.declare_parameter("landmark_color", 'cyan')
+        landmark_color = self.get_parameter("landmark_color").get_parameter_value().string_value
+        
+        self.camera_info_sub = self.create_subscription(CameraInfo, "/camera/camera_info", self.camera_info_callback, 10)
+        self.cyan_points_sub = self.create_subscription(Point2DArrayStamped, "/vision_" + landmark_color + "/corners", self.vision_callback, 10)
+        self.landmark_pub = self.create_publisher(Landmark, "/landmark", 10)
+        
         self.true_width = 2*0.1
         self.true_ratio = self.true_height / self.true_width
-
-        self.distance_ave = 0
-        self.theta_ave = 0
-        self.run = 0
-        
-    # def heartbeat(self):
-        # self.log.info('heartbeat')
 
     def camera_info_callback(self, msg):
 
@@ -71,10 +33,10 @@ class VisionProcessor(Node):
         self.cx = msg.k[2]
         self.cy = msg.k[5]
 
-    def cyan_callback(self, msg):
+    def vision_callback(self, msg):
+        # Only process if there are points present
         if len(msg.points) != 0: 
             points = msg.points 
-            # self.log.info(f"Number of points: {len(points)}")
             x = []
             y = []
             for point in points:
@@ -87,12 +49,13 @@ class VisionProcessor(Node):
             y_max = max(y)
 
             epsilon = 1e-4
-            height = y_max - y_min
-            width = x_max - x_min
-            self.ratio = height / (width + epsilon)
+            dy = y_max - y_min
+            dx = x_max - x_min
+            self.ratio = dy / (dx + epsilon)
 
             threshold1 = 1.5
             threshold2 = 0.7
+            # Drop offending measurement if landmark appears distorted out of the threshold
             if self.ratio > self.true_ratio * threshold1 or self.ratio < self.true_ratio * threshold2:
                 self.log.info(f"Measurement is offending the model, the measured ration is off by {self.ratio/self.true_ratio}")
                 return
@@ -100,19 +63,19 @@ class VisionProcessor(Node):
             center_x = 0.5*(x_max + x_min)
             center_y = 0.5*(y_max + y_min)
 
-            self.log.info(f"Got height = {height}, and center at ({center_x}, {center_y})")
+            self.log.info(f"Got pixel height = {dy}, and pixel center at ({center_x}, {center_y})")
             
             tmp = (self.cx -center_x) / self.fx
             theta = numpy.arctan(tmp)
-            d = self.true_height * self.fy / (height * numpy.cos(theta))
+            d = self.true_height * self.fy / (dy * numpy.cos(theta))
+
             timestamp = Header()
             timestamp.frame_id = "camera_link"
             timestamp.stamp = self.get_clock().now().to_msg()
-            self.landmark_pub.publish(Distance2D(header=timestamp, distance=d, bearing=theta))
+            self.landmark_pub.publish(Landmark(header=timestamp, distance=d, bearing=theta))
 
     def spin(self):
         rclpy.spin(self)
-
 
 def main():
     rclpy.init()

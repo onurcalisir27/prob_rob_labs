@@ -2,8 +2,8 @@ import rclpy
 from rclpy.node import Node
 import math
 from message_filters import Subscriber, ApproximateTimeSynchronizer
-from prob_rob_msgs.msg import Distance2D
-from std_msgs.msg import Float32MultiArray
+from prob_rob_msgs.msg import Landmark
+from std_msgs.msg import Header
 heartbeat_period = 0.1
 
 class LandmarkError(Node):
@@ -13,10 +13,10 @@ class LandmarkError(Node):
         self.log = self.get_logger()
         # self.timer = self.create_timer(heartbeat_period, self.heartbeat)
 
-        self.landmark_gt_sub = Subscriber(self, Distance2D, "/landmark_gt")
-        self.landmark_sub = Subscriber(self, Distance2D, "/landmark")
+        self.landmark_gt_sub = Subscriber(self, Landmark, "/landmark_gt")
+        self.landmark_sub = Subscriber(self, Landmark, "/landmark")
 
-        self.error_pub = self.create_publisher(Float32MultiArray, "/landmark_error", 10)
+        self.landmark_error_pub = self.create_publisher(Landmark, "/landmark_error", 10)
 
         # Slop is tunable
         queue_size = 10
@@ -35,7 +35,8 @@ class LandmarkError(Node):
         self.log.info(f"The measured distance to the landmark was: {landmark.distance} which was off by {self.distance_error}")
         self.log.info(f"The measured bearing to the landmark was: {landmark.bearing} which was off by {self.bearing_error}")
 
-        self.error_pub.publish({self.distance_error, self.bearing_error})
+        timestamp = landmark.header
+        self.landmark_error_pub.publish(Landmark(header=timestamp, distance=self.distance_error, bearing=self.bearing_error))
 
     def spin(self):
         rclpy.spin(self)
