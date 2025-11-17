@@ -34,6 +34,7 @@ setup(
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
+            'ekf_pose_error = ekf_pose_error.ekf_pose_error:main',
             'landmark_ekf = landmark_ekf.landmark_ekf:main',
             'landmark_gt = landmark_gt.landmark_gt:main',
             'landmark_error = landmark_error.landmark_error:main',

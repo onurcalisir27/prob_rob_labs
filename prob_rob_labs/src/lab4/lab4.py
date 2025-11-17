@@ -6,16 +6,11 @@ from std_msgs.msg import Header
 from geometry_msgs.msg import TwistStamped
 from geometry_msgs.msg import PoseStamped
 
-
-heartbeat_period = 1.0/ 30.0
-
 class Lab4(Node):
 
     def __init__(self):
         super().__init__('lab4')
         self.log = self.get_logger()
-        self.timer = self.create_timer(heartbeat_period, self.heartbeat)
-
         self.gt_pose_pub_ = self.create_publisher(PoseStamped, "/tb3/ground_truth/pose", 10)
         self.gt_twist_pub_ = self.create_publisher(TwistStamped, "/tb3/ground_truth/twist", 10)
 
@@ -26,8 +21,11 @@ class Lab4(Node):
 
         self.log.info("Ground truth publisher is started publishing")
 
-    def heartbeat(self):
-        # self.log.info("Heartbeat")
+    def link_callback(self, msg):
+        ind = msg.name.index("waffle_pi::base_footprint")
+        self.ground_truth_pose = msg.pose[ind]
+        self.ground_truth_twist = msg.twist[ind]
+
         header = Header()
         header.frame_id = self.reference_frame
         header.stamp = self.get_clock().now().to_msg()
@@ -42,11 +40,6 @@ class Lab4(Node):
 
         self.gt_pose_pub_.publish(pose_msg)
         self.gt_twist_pub_.publish(twist_msg)
-
-    def link_callback(self, msg):
-        ind = msg.name.index("waffle_pi::base_footprint")
-        self.ground_truth_pose = msg.pose[ind]
-        self.ground_truth_twist = msg.twist[ind]
         
     def spin(self):
         rclpy.spin(self)

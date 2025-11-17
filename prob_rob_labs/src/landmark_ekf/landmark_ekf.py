@@ -7,7 +7,8 @@ from prob_rob_msgs.msg import Point2DArrayStamped
 from nav_msgs.msg import Odometry
 from tf_transformations import quaternion_from_euler
 from geometry_msgs.msg import Quaternion
-
+from tf2_ros import Buffer, TransformListener
+import tf2_geometry_msgs
 path = "/run/host/workdir/local_oc2356/ros2_ws/src/prob_rob_labs_ros_2/landmark_map.json"
 
 class LandmarkEkf(Node):
@@ -16,13 +17,19 @@ class LandmarkEkf(Node):
         super().__init__('landmark_ekf')
         self.log = self.get_logger()
 
-        # Get map
+        # get map
         self.declare_parameter("map_path", path)
         file_path = self.get_parameter("map_path").get_parameter_value().string_value
         with open(file_path, 'r') as file:
             self.map = json.load(file)
 
-        # Get camera params
+        # get transform
+        self.tf_buffer = Buffer()
+        self.tf_listener = TransformListener(self.tf_buffer, self)
+        self.timer = self.create_timer(1.0, self.get_transform)
+        self.transform = None
+
+        # get camera params
         self.camera_sub = self.create_subscription(CameraInfo, '/camera/camera_info', self.camera_callback, 10)
         self.fx= None
         self.fy= None
@@ -31,9 +38,9 @@ class LandmarkEkf(Node):
         
         # get odometry
         self.odom_sub = self.create_subscription(Odometry, '/odom', self.odom_callback, 10)
-        self.state = numpy.zeros((3, 1)) # x, y , theta
+        self.state = numpy.array([[-1.5],[0.0],[0.0]]) # from turtlebot spawn
         self.I = numpy.identity(3)
-        self.Cov = 0.01 * self.I
+        self.Cov = 0.01 * self.I # pretty confident initialiation
         self.M = numpy.array([[1.0e-05, 0.0], # Twist covariance from odom topic
                               [0.0, 0.001]])
         self.G = self.I # state transition jacobian at rest
@@ -44,7 +51,7 @@ class LandmarkEkf(Node):
         self.last_vel = None
         self.odom_pub = self.create_publisher(Odometry, "/ekf_pose", 10)
 
-        # Get measurement model
+        # get measurement model
         self.landmark_ratio = 0.5 / (2*0.1) # height / 2*radius
         self.measurement_model = []
         for color, landmark in self.map.items():
@@ -58,8 +65,8 @@ class LandmarkEkf(Node):
     def measurement_cb(self, msg, c, z):
         if not self.initialized:
             self.initialized = True # initialize with first measurement
-            self.system_time = msg.header.stamp
-            return # skip the first measurement as initializer
+            self.system_time = self.seconds(msg.header.stamp)
+            return # sack first measurement as initialization point
         
         # get measurement
         range, bearing = self.vision_process(msg.points, c)
@@ -67,9 +74,11 @@ class LandmarkEkf(Node):
             # No viable measurement
             return
         
-        timestamp = msg.header.stamp
+        # range, bearing = self.transform_measurement(range, bearing)
+        
+        timestamp = self.seconds(msg.header.stamp)
         dt = (timestamp - self.system_time)
-        if dt <= 0:
+        if dt < 0:
             return # late-arriving sample or no time elapsed
         
         self.system_time = timestamp
@@ -78,7 +87,7 @@ class LandmarkEkf(Node):
             v, w = self.last_vel
             self.prediction(v, w, dt)
             self.measurement_update(z, range, bearing)
-            self.publish_odom(timestamp)
+            self.publish_odom(msg.header.stamp)
         else:
             return
 
@@ -91,7 +100,7 @@ class LandmarkEkf(Node):
         if not self.initialized:
             return # wait for first measurement
         
-        timestamp = msg.header.stamp
+        timestamp = self.seconds(msg.header.stamp)
         dt = (timestamp - self.system_time)
         if dt <= 0 :
             return # late-arriving sample or no time elapsed
@@ -154,7 +163,6 @@ class LandmarkEkf(Node):
         dz = numpy.array([[range - z1], 
                           [self.unwrap(bearing - z2)]])
 
-
         # [2x2] = [2x3]@[3x3]@[3x2] + [2x2] 
         S = self.H @ self.Cov @ self.H.T + self.Q
         # [3x2] = [3x3]@[3x2]@[2x2] 
@@ -190,7 +198,7 @@ class LandmarkEkf(Node):
             # Drop offending measurement if landmark appears distorted out of the threshold
             if self.ratio > self.landmark_ratio * threshold1 or self.ratio < self.landmark_ratio * threshold2:
                 self.log.info(f"Measurement is offending the model, the measured ration is off by {self.ratio/self.landmark_ratio}")
-                return None
+                return None, None
 
             center_x = 0.5*(x_max + x_min)
             tmp = (self.cx -center_x) / self.fx
@@ -201,7 +209,7 @@ class LandmarkEkf(Node):
 
             return range, bearing
         else:
-            return None
+            return None, None
         
     def measurement_variance(self, range):
         self.Q[0,0] = max(0.001, -0.002094 + 0.001508 * range)
@@ -251,6 +259,27 @@ class LandmarkEkf(Node):
             self.cx = msg.k[2]
             self.cy = msg.k[5]
     
+    def seconds(self, timestamp):
+        return timestamp.sec + timestamp.nanosec / 1e9
+    
+    def get_transform(self):
+        if self.transform is not None:
+            return # get the transform once
+        T_base_to_camera = self.tf_buffer.lookup_transform('base_link', 'camera_rgb_frame', rclpy.time.Time(), timeout=rclpy.duration.Duration(seconds=1.0))
+        self.transform = T_base_to_camera
+        self.log.info('Got camera to base link transform')
+        self.log.info(f'Translation: x={self.transform.transform.translation.x:.3f}, y={self.transform.transform.translation.y:.3f}')
+        self.timer.cancel()
+
+    def transform_measurement(self, range, bearing):
+        if self.transform is None:
+            self.log.error('No transform available')
+            return None, None
+        
+        translation = self.transform.transform.translation
+        rotation = self.transform.transform.rotation
+
+
     def spin(self):
         rclpy.spin(self)
 
@@ -264,14 +293,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-
-'''
-twist
-  covariance:
-  - 1.0e-05, 0.0, 0.0, 0.0, 0.0, 0.0
-  - 0.0, 1.0e-05, 0.0, 0.0, 0.0, 0.0
-  - 0.0, 0.0, 1000000000000.0, 0.0, 0.0, 0.0
-  - 0.0, 0.0, 0.0, 1000000000000.0, 0.0, 0.0
-  - 0.0, 0.0, 0.0, 0.0, 1000000000000.0, 0.0
-  - 0.0, 0.0, 0.0, 0.0, 0.0, 0.001
-'''
