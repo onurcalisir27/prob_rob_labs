@@ -34,6 +34,7 @@ setup(
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
+            'landmark_ekf = landmark_ekf.landmark_ekf:main',
             'landmark_gt = landmark_gt.landmark_gt:main',
             'landmark_error = landmark_error.landmark_error:main',
             'lab4_odom_error = lab4_odom_error.lab4_odom_error:main',
