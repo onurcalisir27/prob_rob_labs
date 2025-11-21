@@ -109,6 +109,7 @@ class LandmarkEkf(Node):
         
         # run prediction step
         self.prediction(v, w, dt)
+        self.publish_odom(timestamp)
         self.system_time = timestamp
         
     def prediction(self, v, w, dt):
@@ -147,15 +148,33 @@ class LandmarkEkf(Node):
         self.Cov = self.G @ self.Cov @ self.G.T + self.V @ self.M @ self.V.T
     
     def measurement_update(self, landmark, range, bearing):
-        # notation change: we only really care about the difference m - state so we will replace m with that
        
         # Frame Transformation Required
+        
+        '''
+        Uncertain Robot pose in map reference frame: T_MAP_to_BASE
+        state(x,y,theta), Cov
+
+        Uncertain camera pose in map reference frame: T_MAP_to_CAMERA
+        T_MC = T_MB T_BC 
+        
+        T_BASE_to_CAMERA
+        translation: t, rotation(z): phi
+
+        Result:
+        Rotation uncertainty does not change, new term in translation
+
+        to our position (x,y) we need to add the R(theta)*t translation
+        to our 
+
+        '''
+
         # Covariance Transformation too?
 
         # Transform State to Camera Frame Here
 
         
-
+        # notation change: we only really care about the difference m - state so we will replace m with that
         my = landmark['y'] - self.state[1,0]
         mx = landmark['x'] - self.state[0,0]
 
@@ -188,7 +207,7 @@ class LandmarkEkf(Node):
     def vision_process(self, points, color):
         # Accept a measurement if enough points are presented
         if len(points) >= 4: 
-            self.log.info(f"Received measurements from {color} landmark")
+            # self.log.info(f"Received measurements from {color} landmark")
             x = []
             y = []
             for point in points:
@@ -216,7 +235,7 @@ class LandmarkEkf(Node):
             tmp = (self.cx -center_x) / self.fx
             bearing = numpy.arctan(tmp)
             range = 0.5 * self.fy / (dy * numpy.cos(bearing))
-            self.log.info(f"Measurement: {range} meters, {bearing} rad")
+            # self.log.info(f"Measurement: {range} meters, {bearing} rad")
             self.update_measurement_variance(range)
 
             return range, bearing
@@ -230,8 +249,8 @@ class LandmarkEkf(Node):
     def publish_odom(self, timestamp):
         odom_msg = Odometry()
         odom_msg.header.stamp = timestamp
-        odom_msg.header.frame_id = "odom"
-        odom_msg.child_frame_id = "base_footprint"
+        odom_msg.header.frame_id = "map"
+        odom_msg.child_frame_id = "base_link"
 
         odom_msg.pose.pose.position.x = self.state[0, 0]
         odom_msg.pose.pose.position.y = self.state[1, 0]
@@ -276,7 +295,7 @@ class LandmarkEkf(Node):
         return timestamp.sec + timestamp.nanosec / 1e9
     
     def get_transform(self):
-        if self.transform is not None:
+        if self.T_base_to_camera is not None:
             return # get the transform once
         try:
             self.T_base_to_camera = self.tf_buffer.lookup_transform('camera_rgb_frame',

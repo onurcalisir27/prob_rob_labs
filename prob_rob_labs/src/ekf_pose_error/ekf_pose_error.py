@@ -5,7 +5,7 @@ import math
 from geometry_msgs.msg import PoseStamped
 from message_filters import Subscriber, ApproximateTimeSynchronizer
 from tf_transformations import euler_from_quaternion
-from std_msgs.msg import Float32MultiArray
+from prob_rob_msgs.msg import Odom2D
 
 class EkfPoseError(Node):
 
@@ -21,7 +21,7 @@ class EkfPoseError(Node):
                                                 slop=0.1)
         
         self.sync.registerCallback(self.error_callback)
-        self.error_pub = self.create_publisher(Float32MultiArray, "/pose_error", 10)
+        self.error_pub = self.create_publisher(Odom2D, "/pose_error", 10)
 
     def spin(self):
         rclpy.spin(self)
@@ -39,8 +39,9 @@ class EkfPoseError(Node):
         angle_error = self.unwrap(gt_theta - ekf_theta)
 
         # Publish
-        error_msg = Float32MultiArray()
-        error_msg = {position_error, angle_error}
+        error_msg = Odom2D()
+        error_msg.pos_error = position_error
+        error_msg.ang_error = angle_error
         self.error_pub.publish(error_msg)
         
     def quaternion_to_yaw(self, quaternion):

@@ -14,11 +14,7 @@ def generate_launch_description():
         DeclareLaunchArgument('use_sim_time', default_value='true',
                               description='set to true for simulation'),
 
-        # Robot base ground truth publisher
-        IncludeLaunchDescription(PythonLaunchDescriptionSource(
-            os.path.join(launch_path, 'lab4_launch.py')
-        ),
-        ),
+
 
         # Error publisher
         Node(
