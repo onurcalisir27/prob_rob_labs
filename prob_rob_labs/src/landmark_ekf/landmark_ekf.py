@@ -7,8 +7,11 @@ from prob_rob_msgs.msg import Point2DArrayStamped
 from nav_msgs.msg import Odometry
 from tf_transformations import quaternion_from_euler
 from geometry_msgs.msg import Quaternion
-from tf2_ros import Buffer, TransformListener
-import tf2_geometry_msgs
+
+from tf2_ros import TransformException
+from tf2_ros.buffer import Buffer
+from tf2_ros.transform_listener import TransformListener
+
 path = "/run/host/workdir/local_oc2356/ros2_ws/src/prob_rob_labs_ros_2/landmark_map.json"
 
 class LandmarkEkf(Node):
@@ -23,11 +26,13 @@ class LandmarkEkf(Node):
         with open(file_path, 'r') as file:
             self.map = json.load(file)
 
-        # get transform
+        # get transforms
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self)
         self.timer = self.create_timer(1.0, self.get_transform)
-        self.transform = None
+
+        self.T_camera_to_base = None
+        self.T_base_to_camera = None
 
         # get camera params
         self.camera_sub = self.create_subscription(CameraInfo, '/camera/camera_info', self.camera_callback, 10)
@@ -37,8 +42,9 @@ class LandmarkEkf(Node):
         self.cy= None
         
         # get odometry
+        self.model_tolerance = 0.05 # Switch between linear and arc motion model
         self.odom_sub = self.create_subscription(Odometry, '/odom', self.odom_callback, 10)
-        self.state = numpy.array([[-1.5],[0.0],[0.0]]) # from turtlebot spawn
+        self.state = numpy.array([[-1.5],[0.0],[0.0]]) # from turtlebot spawn launch file
         self.I = numpy.identity(3)
         self.Cov = 0.01 * self.I # pretty confident initialiation
         self.M = numpy.array([[1.0e-05, 0.0], # Twist covariance from odom topic
@@ -46,7 +52,7 @@ class LandmarkEkf(Node):
         self.G = self.I # state transition jacobian at rest
         self.V = numpy.zeros((3,2)) # input jacobian
 
-        self.system_time = None
+        self.system_time = None # Need to initialize system time from first measurement
         self.initialized = False
         self.last_vel = None
         self.odom_pub = self.create_publisher(Odometry, "/ekf_pose", 10)
@@ -65,7 +71,7 @@ class LandmarkEkf(Node):
     def measurement_cb(self, msg, c, z):
         if not self.initialized:
             self.initialized = True # initialize with first measurement
-            self.system_time = self.seconds(msg.header.stamp)
+            self.system_time = msg.header.stamp
             return # sack first measurement as initialization point
         
         # get measurement
@@ -74,22 +80,18 @@ class LandmarkEkf(Node):
             # No viable measurement
             return
         
-        # range, bearing = self.transform_measurement(range, bearing)
-        
-        timestamp = self.seconds(msg.header.stamp)
-        dt = (timestamp - self.system_time)
+        timestamp = msg.header.stamp
+        dt = (self.seconds(timestamp) - self.seconds(self.system_time))
         if dt < 0:
             return # late-arriving sample or no time elapsed
         
-        self.system_time = timestamp
-
         if dt > 0 and self.last_vel is not None:
             v, w = self.last_vel
             self.prediction(v, w, dt)
-            self.measurement_update(z, range, bearing)
-            self.publish_odom(msg.header.stamp)
-        else:
-            return
+ 
+        self.measurement_update(z, range, bearing)
+        self.publish_odom(timestamp)
+        self.system_time = timestamp
 
     def odom_callback(self, msg):
         # store velocity
@@ -100,18 +102,18 @@ class LandmarkEkf(Node):
         if not self.initialized:
             return # wait for first measurement
         
-        timestamp = self.seconds(msg.header.stamp)
-        dt = (timestamp - self.system_time)
+        timestamp = msg.header.stamp
+        dt = (self.seconds(timestamp) - self.seconds(self.system_time))
         if dt <= 0 :
             return # late-arriving sample or no time elapsed
-        self.system_time = timestamp
-
+        
         # run prediction step
         self.prediction(v, w, dt)
+        self.system_time = timestamp
         
     def prediction(self, v, w, dt):
         theta = self.state[2,0]
-        if abs(w) < 0.01:
+        if abs(w) < self.model_tolerance:
             # Linear model update
             self.G[0,2] = -v*dt*numpy.sin(theta)
             self.G[1,2] = v*dt*numpy.cos(theta)
@@ -145,7 +147,15 @@ class LandmarkEkf(Node):
         self.Cov = self.G @ self.Cov @ self.G.T + self.V @ self.M @ self.V.T
     
     def measurement_update(self, landmark, range, bearing):
-        # notation change: we only really care about the difference m-state so we will replace m with that
+        # notation change: we only really care about the difference m - state so we will replace m with that
+       
+        # Frame Transformation Required
+        # Covariance Transformation too?
+
+        # Transform State to Camera Frame Here
+
+        
+
         my = landmark['y'] - self.state[1,0]
         mx = landmark['x'] - self.state[0,0]
 
@@ -158,10 +168,12 @@ class LandmarkEkf(Node):
         self.H[1,0] = my / q
         self.H[1,1] = -mx / q
 
-        # Frame Transformation Required
-        # Covariance Transformation too?
+
         dz = numpy.array([[range - z1], 
                           [self.unwrap(bearing - z2)]])
+
+        # Transform Back to Base Frame
+
 
         # [2x2] = [2x3]@[3x3]@[3x2] + [2x2] 
         S = self.H @ self.Cov @ self.H.T + self.Q
@@ -175,7 +187,7 @@ class LandmarkEkf(Node):
 
     def vision_process(self, points, color):
         # Accept a measurement if enough points are presented
-        if len(points) > 4: 
+        if len(points) >= 4: 
             self.log.info(f"Received measurements from {color} landmark")
             x = []
             y = []
@@ -205,13 +217,13 @@ class LandmarkEkf(Node):
             bearing = numpy.arctan(tmp)
             range = 0.5 * self.fy / (dy * numpy.cos(bearing))
             self.log.info(f"Measurement: {range} meters, {bearing} rad")
-            self.measurement_variance(range)
+            self.update_measurement_variance(range)
 
             return range, bearing
         else:
             return None, None
         
-    def measurement_variance(self, range):
+    def update_measurement_variance(self, range):
         self.Q[0,0] = max(0.001, -0.002094 + 0.001508 * range)
         self.Q[1,1] = max(0.0001, 0.000127 - 0.000004 * range)
 
@@ -258,27 +270,30 @@ class LandmarkEkf(Node):
             self.fy = msg.k[4]
             self.cx = msg.k[2]
             self.cy = msg.k[5]
-    
+        else:
+            return
     def seconds(self, timestamp):
         return timestamp.sec + timestamp.nanosec / 1e9
     
     def get_transform(self):
         if self.transform is not None:
             return # get the transform once
-        T_base_to_camera = self.tf_buffer.lookup_transform('base_link', 'camera_rgb_frame', rclpy.time.Time(), timeout=rclpy.duration.Duration(seconds=1.0))
-        self.transform = T_base_to_camera
+        try:
+            self.T_base_to_camera = self.tf_buffer.lookup_transform('camera_rgb_frame',
+                                                                    'base_link', 
+                                                                    rclpy.time.Time(), 
+                                                                    timeout=rclpy.duration.Duration(seconds=1.0))
+            
+            self.T_camera_to_base = self.tf_buffer.lookup_transform('base_link', 
+                                                                    'camera_rgb_frame', 
+                                                                    rclpy.time.Time(), 
+                                                                    timeout=rclpy.duration.Duration(seconds=1.0))
+        except TransformException as ex:
+            self.log.info('Couldnt get transform')
+            return
+            
         self.log.info('Got camera to base link transform')
-        self.log.info(f'Translation: x={self.transform.transform.translation.x:.3f}, y={self.transform.transform.translation.y:.3f}')
         self.timer.cancel()
-
-    def transform_measurement(self, range, bearing):
-        if self.transform is None:
-            self.log.error('No transform available')
-            return None, None
-        
-        translation = self.transform.transform.translation
-        rotation = self.transform.transform.rotation
-
 
     def spin(self):
         rclpy.spin(self)

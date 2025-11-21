@@ -18,7 +18,7 @@ class EkfPoseError(Node):
         
         self.sync = ApproximateTimeSynchronizer([self.ekf_sub, self.gt_sub], 
                                                 queue_size=10, 
-                                                slop=0.5)
+                                                slop=0.1)
         
         self.sync.registerCallback(self.error_callback)
         self.error_pub = self.create_publisher(Float32MultiArray, "/pose_error", 10)
