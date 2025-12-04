@@ -5,7 +5,7 @@ from rclpy.node import Node
 from sensor_msgs.msg import CameraInfo
 from prob_rob_msgs.msg import Point2DArrayStamped
 from nav_msgs.msg import Odometry
-from tf_transformations import quaternion_from_euler
+from tf_transformations import quaternion_from_euler, euler_from_quaternion
 from geometry_msgs.msg import Quaternion
 
 from tf2_ros import TransformException
@@ -147,65 +147,60 @@ class LandmarkEkf(Node):
         # covariance update is the same
         self.Cov = self.G @ self.Cov @ self.G.T + self.V @ self.M @ self.V.T
     
-    def measurement_update(self, landmark, range, bearing):
-       
-        # Frame Transformation Required
+    def measurement_update(self, landmark, range_meas, bearing_meas):
+
+        x = self.state[0, 0]
+        y = self.state[1, 0]
+        theta = self.state[2, 0]
         
-        '''
-        Uncertain Robot pose in map reference frame: T_MAP_to_BASE
-        state(x,y,theta), Cov
-
-        Uncertain camera pose in map reference frame: T_MAP_to_CAMERA
-        T_MC = T_MB T_BC 
+        mx, my = landmark['x'], landmark['y']
+        r_cylinder = 0.1
         
-        T_BASE_to_CAMERA
-        translation: t, rotation(z): phi
-
-        Result:
-        Rotation uncertainty does not change, new term in translation
-
-        to our position (x,y) we need to add the R(theta)*t translation
-        to our 
-
-        '''
-
-        # Covariance Transformation too?
-
-        # Transform State to Camera Frame Here
-
+        # Camera pose 
+        x_cam = numpy.cos(theta) * self.t[0] - numpy.sin(theta) * self.t[1] + x
+        y_cam = numpy.sin(theta) * self.t[0] + numpy.cos(theta) * self.t[1] + y
+        theta_cam = theta + self.phi
         
-        # notation change: we only really care about the difference m - state so we will replace m with that
-        my = landmark['y'] - self.state[1,0]
-        mx = landmark['x'] - self.state[0,0]
+        # Expected measurement
+        delta_x = mx - x_cam
+        delta_y = my - y_cam
+        q = delta_x**2 + delta_y**2
+        r_hat = numpy.sqrt(q)
+        
+        expected_range = r_hat - r_cylinder
+        expected_bearing = self.unwrap(numpy.arctan2(delta_y, delta_x) - theta_cam)
+        
+        n_x = -numpy.sin(theta) * self.t[0] - numpy.cos(theta) * self.t[1]
+        n_y =  numpy.cos(theta) * self.t[0] - numpy.sin(theta) * self.t[1]
 
-        q = (mx**2 + my**2)
-        z1 = numpy.sqrt(q)
-        z2 = self.unwrap(numpy.arctan2(my, mx) - self.state[2,0])
+        H = numpy.zeros((2, 3))
+        H[0, 0] = -delta_x / r_hat
+        H[0, 1] = -delta_y / r_hat
+        H[0, 2] = (-delta_x * n_x - delta_y * n_y) / r_hat
+        
+        H[1, 0] = delta_y / q
+        H[1, 1] = -delta_x / q
+        H[1, 2] = (delta_y * n_x - delta_x * n_y) / q - 1.0
+        
+        # Innovation
+        dz = numpy.array([
+            [range_meas - expected_range],
+            [self.unwrap(bearing_meas - expected_bearing)]
+        ])
 
-        self.H[0,0] = - mx / z1
-        self.H[0,1] = -my / z1
-        self.H[1,0] = my / q
-        self.H[1,1] = -mx / q
-
-
-        dz = numpy.array([[range - z1], 
-                          [self.unwrap(bearing - z2)]])
-
-        # Transform Back to Base Frame
-
-
-        # [2x2] = [2x3]@[3x3]@[3x2] + [2x2] 
-        S = self.H @ self.Cov @ self.H.T + self.Q
-        # [3x2] = [3x3]@[3x2]@[2x2] 
-        K = self.Cov @ self.H.T @ numpy.linalg.inv(S)
-        # [3x1] = [3x1] + [3x2]@[2x1]
+        S = H @ self.Cov @ H.T + self.Q
+        K = self.Cov @ H.T @ numpy.linalg.inv(S)
+        
         self.state = self.state + K @ dz
-        self.state[2,0] = self.unwrap(self.state[2,0])
-        # [3x3] = [3x3] - [3x2]@[2x3])@[3x3]
-        self.Cov = (self.I - K@self.H)@self.Cov
+        self.state[2, 0] = self.unwrap(self.state[2, 0])
+        self.Cov = (self.I - K @ H) @ self.Cov
 
     def vision_process(self, points, color):
+        
         # Accept a measurement if enough points are presented
+        if self.fx is None:
+            return None, None# wait untill camera data arrives
+        
         if len(points) >= 4: 
             # self.log.info(f"Received measurements from {color} landmark")
             x = []
@@ -249,8 +244,8 @@ class LandmarkEkf(Node):
     def publish_odom(self, timestamp):
         odom_msg = Odometry()
         odom_msg.header.stamp = timestamp
-        odom_msg.header.frame_id = "map"
-        odom_msg.child_frame_id = "base_link"
+        odom_msg.header.frame_id = "odom"
+        odom_msg.child_frame_id = "base_footprint"
 
         odom_msg.pose.pose.position.x = self.state[0, 0]
         odom_msg.pose.pose.position.y = self.state[1, 0]
@@ -283,6 +278,32 @@ class LandmarkEkf(Node):
         q.w = quaternions[3]
         return q
     
+    # quaternion to yaw
+    def q2yaw(self, quaternion):
+        euler = euler_from_quaternion([quaternion.x, 
+                                       quaternion.y, 
+                                       quaternion.z, 
+                                       quaternion.w])
+        return euler[2]
+    
+
+    def transformation_matrix(self, position, orientation):
+        theta = self.q2yaw(orientation)
+        rot =  numpy.array([
+            [numpy.cos(theta), -numpy.sin(theta)],
+            [numpy.sin(theta), numpy.cos(theta)]
+        ])
+
+        t = numpy.array([
+            position.x, 
+            position.y
+            ])
+        
+        T = numpy.identity(3)
+        T[0:2, 0:2] = rot
+        T[0:2, 2] = t
+        return T
+
     def camera_callback(self, msg):
         if self.fx is None:
             self.fx = msg.k[0]
@@ -298,21 +319,30 @@ class LandmarkEkf(Node):
         if self.T_base_to_camera is not None:
             return # get the transform once
         try:
-            self.T_base_to_camera = self.tf_buffer.lookup_transform('camera_rgb_frame',
-                                                                    'base_link', 
+            self.T_base_to_camera = self.tf_buffer.lookup_transform('base_link',
+                                                                    'camera_rgb_frame', 
                                                                     rclpy.time.Time(), 
                                                                     timeout=rclpy.duration.Duration(seconds=1.0))
-            
+            self.phi = self.q2yaw(self.T_base_to_camera.transform.rotation)
+            translation = self.T_base_to_camera.transform.translation
+            self.t = numpy.array([
+                translation.x,
+                translation.y
+            ])
             self.T_camera_to_base = self.tf_buffer.lookup_transform('base_link', 
                                                                     'camera_rgb_frame', 
                                                                     rclpy.time.Time(), 
                                                                     timeout=rclpy.duration.Duration(seconds=1.0))
+            
+            self.log.info(f'Camera offset: tx={self.t[0]:.4f}, ty={self.t[1]:.4f}, phi={self.phi:.4f}')
+            self.timer.cancel()
+        
         except TransformException as ex:
             self.log.info('Couldnt get transform')
             return
             
         self.log.info('Got camera to base link transform')
-        self.timer.cancel()
+        
 
     def spin(self):
         rclpy.spin(self)
