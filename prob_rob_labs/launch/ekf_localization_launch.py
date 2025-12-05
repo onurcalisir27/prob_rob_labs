@@ -10,6 +10,7 @@ from launch_ros.actions import Node
 def generate_launch_description():
     pkg_dir = get_package_share_directory('prob_rob_labs')
     launch_path = os.path.join(pkg_dir, 'launch')
+    rviz_config = os.path.join(pkg_dir, 'rviz', 'ekf_localization.rviz')
 
     return LaunchDescription([
         DeclareLaunchArgument('use_sim_time', default_value='true',
@@ -29,5 +30,14 @@ def generate_launch_description():
         IncludeLaunchDescription(PythonLaunchDescriptionSource(
             os.path.join(launch_path, 'ekf_pose_error_launch.py')
         ),
-        )
+        ),
+
+        Node(
+            package='rviz2',
+            executable='rviz2',
+            name='rviz2',
+            arguments=['-d', rviz_config],
+            parameters=[{'use_sim_time': LaunchConfiguration('use_sim_time')}],
+            output='screen'
+        ),
     ])
