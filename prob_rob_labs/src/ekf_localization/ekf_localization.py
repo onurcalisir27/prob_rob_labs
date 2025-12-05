@@ -51,7 +51,7 @@ class EkfLocalization(Node):
     def update_transform(self, msg):
         try:
             t = self.tf_buffer.lookup_transform(
-                                'base_link',
+                                'base_footprint',
                                 'odom',
                                 time=rclpy.time.Time(),
                                 timeout=rclpy.duration.Duration(seconds=1.0))

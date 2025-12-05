@@ -49,7 +49,7 @@ class LandmarkEkf(Node):
         self.state = numpy.array([[-1.5],[0.0],[0.0]]) # from turtlebot spawn launch file
         self.I = numpy.identity(3)
         self.Cov = 0.01 * self.I # pretty confident initialiation
-        
+
         self.G = self.I # state transition jacobian at rest
         self.V = numpy.zeros((3,2)) # input jacobian
 
@@ -156,8 +156,8 @@ class LandmarkEkf(Node):
 
 
         alpha1 = 0.01
-        alpha2 = 0.01
-        alpha3 = 0.01
+        alpha2 = 0.05
+        alpha3 = 0.05
         alpha4 = 0.01 
         
         # Velocity-dependent noise
@@ -166,7 +166,6 @@ class LandmarkEkf(Node):
             [0.0, alpha3 * v**2 + alpha4 * w**2]
         ])
 
-        # covariance update is the same
         self.Cov = self.G @ self.Cov @ self.G.T + self.V @ M @ self.V.T
     
     def measurement_update(self, landmark, range_meas, bearing_meas):
@@ -267,7 +266,7 @@ class LandmarkEkf(Node):
     def publish_odom(self, timestamp):
         odom_msg = Odometry()
         odom_msg.header.stamp = timestamp
-        odom_msg.header.frame_id = "odom"
+        odom_msg.header.frame_id = "map"
         odom_msg.child_frame_id = "base_footprint"
 
         odom_msg.pose.pose.position.x = self.state[0, 0]
@@ -342,7 +341,7 @@ class LandmarkEkf(Node):
         if self.T_base_to_camera is not None:
             return # get the transform once
         try:
-            self.T_base_to_camera = self.tf_buffer.lookup_transform('base_link',
+            self.T_base_to_camera = self.tf_buffer.lookup_transform('base_footprint',
                                                                     'camera_rgb_frame', 
                                                                     rclpy.time.Time(), 
                                                                     timeout=rclpy.duration.Duration(seconds=1.0))
@@ -352,12 +351,8 @@ class LandmarkEkf(Node):
                 translation.x,
                 translation.y
             ])
-            self.T_camera_to_base = self.tf_buffer.lookup_transform('base_link', 
-                                                                    'camera_rgb_frame', 
-                                                                    rclpy.time.Time(), 
-                                                                    timeout=rclpy.duration.Duration(seconds=1.0))
-            
-            self.log.info(f'Camera offset: tx={self.t[0]:.4f}, ty={self.t[1]:.4f}, phi={self.phi:.4f}')
+
+            self.log.info(f'Camera offset: tx={self.t[0]}, ty={self.t[1]}, phi={self.phi}')
             self.timer.cancel()
         
         except TransformException as ex:
