@@ -32,7 +32,7 @@ class EkfLocalization(Node):
             return
         # Send the transformation every 30 Hz
         self.Transform.header.stamp = self.get_clock().now().to_msg()
-        self.log.info("Sending Map Transform!")
+        # self.log.info("Sending Map Transform!")
         self.tf_broadcaster.sendTransform(self.Transform)
 
     def localization_callback(self, msg):
@@ -42,7 +42,7 @@ class EkfLocalization(Node):
 
         # Check if the trace went down (measurement update)
         if self.prev_trace is not None:
-            if trace < self.prev_trace:
+            if trace < self.prev_trace - 1e-6:
                 self.log.info("Measurement Update! Update Transform")
                 self.Transform = self.update_transform(msg)
 
@@ -74,7 +74,7 @@ class EkfLocalization(Node):
         T_MO = T_MB @ T_BO
 
         translation = T_MO[0:2, 2]
-        theta = numpy.arctan2(T_MO[0,1], T_MO[0,0])
+        theta = numpy.arctan2(T_MO[1,0], T_MO[0,0])
         
         transform = TransformStamped()
         transform.header.stamp = self.get_clock().now().to_msg()

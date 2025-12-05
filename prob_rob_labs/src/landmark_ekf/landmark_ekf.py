@@ -33,6 +33,8 @@ class LandmarkEkf(Node):
 
         self.T_camera_to_base = None
         self.T_base_to_camera = None
+        self.t = None
+        self.phi = None
 
         # get camera params
         self.camera_sub = self.create_subscription(CameraInfo, '/camera/camera_info', self.camera_callback, 10)
@@ -47,8 +49,7 @@ class LandmarkEkf(Node):
         self.state = numpy.array([[-1.5],[0.0],[0.0]]) # from turtlebot spawn launch file
         self.I = numpy.identity(3)
         self.Cov = 0.01 * self.I # pretty confident initialiation
-        self.M = numpy.array([[1.0e-05, 0.0], # Twist covariance from odom topic
-                              [0.0, 0.001]])
+        
         self.G = self.I # state transition jacobian at rest
         self.V = numpy.zeros((3,2)) # input jacobian
 
@@ -74,12 +75,20 @@ class LandmarkEkf(Node):
             self.system_time = msg.header.stamp
             return # sack first measurement as initialization point
         
+        if self.fx is None:
+            return
+        
+        if self.t is None:
+            return
+        
         # get measurement
         range, bearing = self.vision_process(msg.points, c)
         if range is None:
             # No viable measurement
             return
         
+        self.log.info(f"MEASUREMENT from {c}: range={range:.2f}m, bearing={bearing:.3f}rad")
+
         timestamp = msg.header.stamp
         dt = (self.seconds(timestamp) - self.seconds(self.system_time))
         if dt < 0:
@@ -98,8 +107,8 @@ class LandmarkEkf(Node):
         v = msg.twist.twist.linear.x
         w = msg.twist.twist.angular.z
         self.last_vel = (v,w)
-
         if not self.initialized:
+            self.log.info("Not initialized yet, skipping prediction")
             return # wait for first measurement
         
         timestamp = msg.header.stamp
@@ -113,6 +122,7 @@ class LandmarkEkf(Node):
         self.system_time = timestamp
         
     def prediction(self, v, w, dt):
+
         theta = self.state[2,0]
         if abs(w) < self.model_tolerance:
             # Linear model update
@@ -144,8 +154,20 @@ class LandmarkEkf(Node):
             self.state[1,0] = self.state[1,0] + (v/w * numpy.cos(theta) - v/w * numpy.cos(theta+w*dt))
             self.state[2,0] = self.unwrap(theta + w * dt)
 
+
+        alpha1 = 0.01
+        alpha2 = 0.01
+        alpha3 = 0.01
+        alpha4 = 0.01 
+        
+        # Velocity-dependent noise
+        M = numpy.array([
+            [alpha1 * v**2 + alpha2 * w**2, 0.0],
+            [0.0, alpha3 * v**2 + alpha4 * w**2]
+        ])
+
         # covariance update is the same
-        self.Cov = self.G @ self.Cov @ self.G.T + self.V @ self.M @ self.V.T
+        self.Cov = self.G @ self.Cov @ self.G.T + self.V @ M @ self.V.T
     
     def measurement_update(self, landmark, range_meas, bearing_meas):
 
@@ -169,6 +191,7 @@ class LandmarkEkf(Node):
         
         expected_range = r_hat - r_cylinder
         expected_bearing = self.unwrap(numpy.arctan2(delta_y, delta_x) - theta_cam)
+        
         
         n_x = -numpy.sin(theta) * self.t[0] - numpy.cos(theta) * self.t[1]
         n_y =  numpy.cos(theta) * self.t[0] - numpy.sin(theta) * self.t[1]
